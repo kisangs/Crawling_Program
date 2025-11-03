@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import font
-import Beamin_Crawling_Request 
+import Crawling_Request 
 
 
 def load_frame(frame_class):
