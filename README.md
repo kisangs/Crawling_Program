@@ -13,3 +13,7 @@ Make a Crawling Program for Operation Team
 
 Undetrcted CromeDriver를 사용할 수 있도록 변경 완료 ( 쿠팡이츠 테스트 완료 )
 나머지 작업 진행 예정
+
+2025/11/04
+
+쿠팡이츠 가게정보 수집 작업 진행 
