@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import font
 import Crawling_Request 
+import Takedown_Request
 
 
 def load_frame(frame_class):
@@ -38,11 +39,8 @@ content_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 baemin_crawling_btn = ttk.Button(button_frame, text="정보 크롤링 작업",command=lambda: load_frame(Crawling_Request.Crawling), style="TButton")
 baemin_crawling_btn.pack(padx=10, pady=10, fill="x")
 
-baemin_takedown_btn = ttk.Button(button_frame, text="배달의민족 게시중단", command=lambda: load_frame(Baemin_Takedown_Request.Baemin_Takedown), style="TButton")
+baemin_takedown_btn = ttk.Button(button_frame, text="게시중단 요청 작업", command=lambda: load_frame(Takedown_Request.Takedown), style="TButton")
 baemin_takedown_btn.pack(padx=10, pady=10, fill="x")
-
-coupang_takedown_btn = ttk.Button(button_frame, text="쿠팡이츠 게시중단",command=lambda: load_frame(Coupang_Takedown_Request.Coupang_Takedown), style="TButton")
-coupang_takedown_btn.pack(padx=10, pady=10, fill="x")
 
 # 폰트 설정 (옵션)
 default_font = font.nametofont("TkDefaultFont")

@@ -13,7 +13,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 
-class Crawling(tk.Frame):
+class Takedown(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.file_path = None
@@ -27,19 +27,20 @@ class Crawling(tk.Frame):
         
         # 다크 모드 스타일 설정
         style.configure('TFrame', background='#2b2b2b')
-        style.configure('TButton', background='#ffffff', foreground='#000000', font=('Helvetica', 12, 'bold'))
+        style.configure('TButton', background='#ffffff', foreground='#000000', font=('Helvetica', 10, 'bold'))
         style.configure('TLabel', background='#2b2b2b', foreground='#ffffff')
         style.configure('TProgressbar', foreground='#00ff00', background='#3c3c3c')
         style.configure('TProgressbar.Horizontal.TProgressbar', troughcolor='#3c3c3c', background='#00ff00')
         style.configure('Treeview', background='#2b2b2b', foreground='#ffffff', fieldbackground='#2b2b2b', bordercolor='#ffffff')
         style.map('Treeview', background=[('selected', '#3c3c3c')], foreground=[('selected', '#ffffff')])
         style.configure('Treeview.Heading', background='#3c3c3c', foreground='#ffffff')
-
-        #엑셀 파일 업로드 버튼 생성
+        style.configure('TEntry', fieldbackground='#ffffff', background='#2b2b2b', foreground='#000000')
+        
+        # 엑셀 파일 업로드 버튼 생성
         self.upload_button = ttk.Button(self, text="엑셀 파일 업로드", command=self.upload_file, style='TButton')
         self.upload_button.pack(pady=10)
         
-        #프레임 생성
+        # 프레임 생성
         self.service_frame = ttk.Frame(self, style='TFrame')
         self.service_frame.pack(pady=10)
         
@@ -48,14 +49,35 @@ class Crawling(tk.Frame):
         
         self.coupang_radio = ttk.Radiobutton(self.service_frame, text="쿠팡이츠", variable=self.selected_service, value="쿠팡이츠", style='TRadiobutton')
         self.coupang_radio.pack(side=tk.LEFT)
+
+        # Readonly 입력칸 / 검색 버튼들 프레임 생성
+        self.input_frame = ttk.Frame(self, style='TFrame')
+        self.input_frame.pack(pady=0, padx=0)
         
-        self.ddangyo_radio = ttk.Radiobutton(self.service_frame, text="땡겨요", variable=self.selected_service, value="땡겨요", style='TRadiobutton')
-        self.ddangyo_radio.pack(side=tk.LEFT)
-        
+        # Readonly 입력칸 / 검색 버튼들 프레임 생성
+        self.input_frame = ttk.Frame(self, style='TFrame')
+        self.input_frame.pack(pady=0, padx=0)
+
+        # 배달의민족 Class 값을 받아올 label 생성
+        self.label1 = ttk.Label(self.input_frame, text="배달의민족 Class 확인 필요", style='TLabel', background='#2b2b2b', foreground='#ffffff', anchor='w')
+        self.label1.pack(side=tk.LEFT, pady=0, padx=10, fill=tk.X, expand=True)
+
+        #배달의민족 Class 검색 버튼 
+        self.search_button1 = ttk.Button(self.input_frame, text="검색", command=self.search_function1, style='TButton')
+        self.search_button1.pack(side=tk.LEFT, pady=0, padx=10)
+
+        # 쿠팡이츠 Class 값을 받아올 label 생성
+        self.label2 = ttk.Label(self.input_frame, text="쿠팡이츠 Class 확인 필요", style='TLabel', background='#2b2b2b', foreground='#ffffff', anchor='w')
+        self.label2.pack(side=tk.LEFT, pady=0, padx=10, fill=tk.X, expand=True)
+
+        #쿠팡이츠 Class 검색 버튼
+        self.search_button2 = ttk.Button(self.input_frame, text="검색", command=self.search_function2, style='TButton')
+        self.search_button2.pack(side=tk.LEFT, pady=0, padx=0)
+
         self.start_button = ttk.Button(self, text="시작", command=self.start_thread, style='TButton')
         self.start_button.pack(pady=10)
         
-        #진행률 ( % ) 확인 용
+        # 진행률 ( % ) 확인 용
         self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100, style='TProgressbar.Horizontal.TProgressbar')
         self.progress_bar.pack(pady=10, padx=10, fill=tk.X)
         
@@ -92,10 +114,18 @@ class Crawling(tk.Frame):
 
     #진행중인 행을 표시할 수 있게 하이라이트 표시 
     def highlight_row(self, row_id):
+        """주어진 행 ID를 하이라이트"""
         for item in self.treeview.get_children():
             self.treeview.item(item, tags="")
         self.treeview.item(row_id, tags=("highlight",))
         self.treeview.tag_configure("highlight", background="yellow", foreground="black")
+
+
+    def search_function1(self):
+        print("Search function 1 executed")
+
+    def search_function2(self):
+        print("Search function 2 executed")
 
     def start_thread(self):
         threading.Thread(target=self.start_crawling).start()
@@ -332,20 +362,12 @@ class Crawling(tk.Frame):
             print(f"쿠팡이츠 에러 발생: {e}")
             self.data_frame.at[row_idx, '에러'] = f"쿠팡이츠 에러 발생: {e}"
 
-    def crawl_ddangyo(self, driver, user_id, user_pw, row_idx):
-        try:
-            driver.get("https://example.com/ddangyo")
-            time.sleep(5)
-            # Implement the specific crawling steps for ddangyo here
-        except Exception as e:
-            print(f"땡겨요 에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"땡겨요 에러 발생: {e}"
 
 # Initialize UI
 if __name__ == '__main__':
     root = tk.Tk()
     root.title("크롤링 프로그램")
     root.geometry("1000x600")
-    frame = Crawling(root)
+    frame = Takedown(root)
     frame.pack(fill="both", expand=True)
     root.mainloop()
