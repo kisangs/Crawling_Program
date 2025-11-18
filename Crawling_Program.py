@@ -1,9 +1,6 @@
 import tkinter as tk
-from tkinter import ttk
-from tkinter import font
-import Crawling_Request 
-import Takedown_Request
-
+from tkinter import ttk, messagebox
+import requests
 
 def load_frame(frame_class):
     for widget in content_frame.winfo_children():
@@ -11,41 +8,63 @@ def load_frame(frame_class):
     frame = frame_class(content_frame)
     frame.pack(fill="both", expand=True)
 
+def get_latest_version_info():
+    response = requests.get('https://api.github.com/repos/kisangs/Crawling_Program/releases/latest')
+    if response.status_code == 200:
+        data = response.json()
+        return data['tag_name'], data['assets'][0]['browser_download_url']
+    else:
+        return None, None
+
+current_version = '1.0.0'
+
+def check_for_updates():
+    latest_version, download_url = get_latest_version_info()
+    if latest_version and latest_version > current_version:
+        if tk.messagebox.askyesno("업데이트 확인", f"새 버전 ({latest_version})이 있습니다. 업데이트를 진행하시겠습니까?"):
+            download_new_version(download_url)
+            tk.messagebox.showinfo("업데이트 완료", "업데이트가 완료되었습니다. 프로그램을 다시 실행해주세요.")
+            os.startfile('new_version.exe')
+            root.destroy()  # 현재 프로그램 종료
+        else:
+            tk.messagebox.showinfo("업데이트 취소", "업데이트가 취소되었습니다.")
+    else:
+        tk.messagebox.showinfo("업데이트 확인", "현재 최신 버전을 사용 중입니다.")
+
+def download_new_version(download_url):
+    response = requests.get(download_url, stream=True)
+    with open('new_version.exe', 'wb') as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            file.write(chunk)
+
 root = tk.Tk()
 root.title("크롤링 프로그램_2025/10/28_Version")
 root.geometry("1800x1000")
 
-# 다크 모드 스타일 설정
 style = ttk.Style()
-
-# 기본 색상 설정
 style.configure("TFrame", background="#2b2b2b")
 style.configure("TLabel", background="#2b2b2b", foreground="#ffffff", font=('Helvetica', 14))
 style.configure("TButton", background="#3c3c3c", foreground="#000000", font=('Helvetica', 12, 'bold'), justify='center', relief="flat")
 
-# 메인 프레임
 main_frame = ttk.Frame(root, style="TFrame")
 main_frame.pack(fill="both", expand=True)
 
-# 버튼 프레임
 button_frame = ttk.Frame(main_frame, width=200, style="TFrame")
 button_frame.pack(side="left", fill="y", padx=10, pady=10)
 
-# 내용 프레임
 content_frame = tk.Frame(main_frame, bg="#1e1e1e", bd=2, relief="solid")
 content_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-# 다크 모드 버튼들
 baemin_crawling_btn = ttk.Button(button_frame, text="정보 크롤링 작업",command=lambda: load_frame(Crawling_Request.Crawling), style="TButton")
 baemin_crawling_btn.pack(padx=10, pady=10, fill="x")
-
 baemin_takedown_btn = ttk.Button(button_frame, text="게시중단 요청 작업", command=lambda: load_frame(Takedown_Request.Takedown), style="TButton")
 baemin_takedown_btn.pack(padx=10, pady=10, fill="x")
 
-# 폰트 설정 (옵션)
+update_check_btn = ttk.Button(button_frame, text="업데이트 확인", command=check_for_updates, style="TButton")
+update_check_btn.pack(padx=10, pady=10, fill="x")
+
 default_font = font.nametofont("TkDefaultFont")
 default_font.configure(size=12)
-
 root.option_add("*TButton*Font", default_font)
 
 root.mainloop()
