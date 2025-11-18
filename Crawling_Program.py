@@ -1,36 +1,54 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import os
 import requests
+import tkinter as tk
+import Crawling_Request 
+import Takedown_Request
+from tkinter import font
+from tkinter import ttk, messagebox
 
+#프레임 생성
 def load_frame(frame_class):
     for widget in content_frame.winfo_children():
         widget.destroy()
     frame = frame_class(content_frame)
     frame.pack(fill="both", expand=True)
 
+#Github에서 최신 파일 확인
 def get_latest_version_info():
     response = requests.get('https://api.github.com/repos/kisangs/Crawling_Program/releases/latest')
     if response.status_code == 200:
         data = response.json()
-        return data['tag_name'], data['assets'][0]['browser_download_url']
+        tag_name = data.get('tag_name')
+        assets = data.get('assets', [])
+        if assets:
+            download_url = assets[0].get('browser_download_url')
+            return tag_name, download_url
+        else:
+            return tag_name, None
     else:
         return None, None
 
+#현재 버전
 current_version = '1.0.0'
 
+#Github에서 최신 파일 업데이트 하기
 def check_for_updates():
     latest_version, download_url = get_latest_version_info()
     if latest_version and latest_version > current_version:
-        if tk.messagebox.askyesno("업데이트 확인", f"새 버전 ({latest_version})이 있습니다. 업데이트를 진행하시겠습니까?"):
-            download_new_version(download_url)
-            tk.messagebox.showinfo("업데이트 완료", "업데이트가 완료되었습니다. 프로그램을 다시 실행해주세요.")
-            os.startfile('new_version.exe')
-            root.destroy()  # 현재 프로그램 종료
+        if download_url:
+            if tk.messagebox.askyesno("업데이트 확인", f"새 버전 ({latest_version})이 있습니다. 업데이트를 진행하시겠습니까?"):
+                download_new_version(download_url)
+                tk.messagebox.showinfo("업데이트 완료", "업데이트가 완료되었습니다. 프로그램을 다시 실행해주세요.")
+                os.startfile('new_version.exe')
+                root.destroy()  # 현재 프로그램 종료
+            else:
+                tk.messagebox.showinfo("업데이트 취소", "업데이트가 취소되었습니다.")
         else:
-            tk.messagebox.showinfo("업데이트 취소", "업데이트가 취소되었습니다.")
+            tk.messagebox.showinfo("업데이트 확인", "새 버전이 있지만, 다운로드 URL을 찾을 수 없습니다.")
     else:
         tk.messagebox.showinfo("업데이트 확인", "현재 최신 버전을 사용 중입니다.")
 
+#Github에서 새로운 파일 다운로드 
 def download_new_version(download_url):
     response = requests.get(download_url, stream=True)
     with open('new_version.exe', 'wb') as file:
