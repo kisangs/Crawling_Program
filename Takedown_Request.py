@@ -261,95 +261,227 @@ class Takedown(tk.Frame):
         finally:
             driver.quit()
 
-    # 배달의민족 리뷰 게시중단 신청 작업
     def takedown_baemin(self, driver, row, row_idx):
         try:
             baemin_class = self.baemin_label.cget("text")
-
-            #배달의민족 리뷰게시중단 사이트로 이동 
+            if not baemin_class:
+                raise Exception("배달의민족 클래스 이름이 설정되지 않았습니다.")
+            
+            # 배달의민족 리뷰게시중단 사이트로 이동 
             driver.get("https://design.happytalkio.com/chatting?siteId=4000000024&siteName=%EC%9A%B0%EC%95%84%ED%95%9C%ED%98%95%EC%A0%9C%EB%93%A4&categoryId=61602&divisionId=200880&partnerId=&shopId=&params=")
             time.sleep(3)
-
+            
             # ► 리뷰 게시중단 신청 버튼 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[@class='{baemin_class}' and text()='► 리뷰 게시중단 신청']"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='► 리뷰 게시중단 신청']"))
             )
             baemin_button.click()
             time.sleep(2)
-
+            
             # 시작하기 버튼 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[contains(@class, '{baemin_class}') and contains(text(), '시작하기')]"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='► 시작하기']"))
             )
             baemin_button.click()
             time.sleep(2)
-
+            
             # 확인했어요 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[contains(@class, '{baemin_class}') and contains(text(), '확인했어요')]"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='확인했어요.']"))
             )
             baemin_button.click()
             time.sleep(2)
-
-            #SHOP_ID 입력
+            
+            # SHOP_ID 입력
             textarea = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[2]/div[3]/div/div/div[2]/div/textarea"))
             )
-            textarea.send_keys(row["SHOP_ID"])   
-
-            #입력 버튼 클릭
-            clip_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div/div/div[3]')))
+            textarea.send_keys(str(row["SHOP_ID"]))
+            time.sleep(2)   
+            
+            # 입력 버튼 클릭
+            clip_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div/div/div[3]'))
+            )
             clip_button.click()
             time.sleep(2)
-
-            #Reivew_Number 입력
+            
+            # Review_Number 입력
             textarea = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[2]/div[3]/div/div/div[2]/div/textarea"))
             )
-            textarea.send_keys(row["Review_Number"])   
-
-            #입력 버튼 클릭
-            clip_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div/div/div[3]')))
+            textarea.send_keys(str(row["Review_Number"]))   
+            time.sleep(2)
+            
+            # 입력 버튼 클릭
+            clip_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div/div/div[3]'))
+            )
             clip_button.click()
             time.sleep(2)
-
+            
             # 대표자 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[contains(@class, '{baemin_class}') and contains(text(), '대표자')]"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='대표자']"))
             )
             baemin_button.click()
             time.sleep(2)
-
+            
             # 이메일 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[contains(@class, '{baemin_class}') and contains(text(), '이메일')]"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='이메일']"))
             )
             baemin_button.click()
             time.sleep(2)
-
+            
             # 접수하기 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[contains(@class, '{baemin_class}') and contains(text(), '접수하기')]"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='► 접수하기']"))
             )
             baemin_button.click()
             time.sleep(2)
-
+            
             self.data_frame.at[row_idx, '상태'] = "성공"
 
         except Exception as e:
-            print(f"배달의민족 에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"배달의민족 에러 발생: {e}"
+            logging.error(f"배달의민족 에러 발생: {e}")
+            self.data_frame.at[row_idx, '상태'] = f"배달의민족 에러 발생: {e}"
 
     # 쿠팡이츠 리뷰 게시중단 신청 작업 
     def takedown_coupang(self, driver, row, row_idx):
         try:
-            driver.get("https://design.happytalkio.com/chatting?siteId=4000002553&siteName=%EC%BF%A0%ED%8C%A1%EC%9D%B4%EC%B8%A0&categoryId=154858&divisionId=155774&partnerId=&shopId=&params=")
-            time.sleep(5)
+            coupang_class = self.coupang_label.cget("text")
+            if not coupang_class:
+                raise Exception("쿠팡이츠 클래스 이름이 설정되지 않았습니다.")
             
+            # 쿠팡이츠 리뷰게시중단 사이트로 이동 
+            driver.get("https://design.happytalkio.com/chatting?siteId=4000002553&siteName=%EC%BF%A0%ED%8C%A1%EC%9D%B4%EC%B8%A0&categoryId=154858&divisionId=155774&partnerId=&shopId=&params=")
+            time.sleep(3)
+            
+            # 리뷰 블라인드/게시중단 요청 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='리뷰 블라인드/게시중단 요청']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+            
+            # 게시중단 요청만 신청 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='게시중단 요청만 신청']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+
+            # 본인신청 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='본인 신청']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+            
+            # ► 간편하게 접수하기 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='▶ 간편하게 접수하기']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+
+            # ► 계속 신청하기 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='▶ 계속 신청하기']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+
+            # SHOP_ID 입력
+            textarea = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[3]/div/textarea"))
+            )
+            textarea.send_keys(str(row["SHOP_ID"]))   
+            time.sleep(2)
+            
+            # 입력 버튼 클릭
+            clip_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[4]'))
+            )
+            clip_button.click()
+            time.sleep(2)
+
+            # Business Number 입력
+            textarea = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[3]/div/textarea"))
+            )
+            textarea.send_keys(str(row["Business Number"]))   
+            time.sleep(2)
+            
+            # 입력 버튼 클릭
+            clip_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[4]'))
+            )
+            clip_button.click()
+            time.sleep(2)
+
+            # 일치하며 이어서 진행하기 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='일치하며 이어서 진행하기']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+            
+            # Order_Number 입력
+            textarea = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[3]/div/textarea"))
+            )
+            textarea.send_keys(str(row["Order_Number"]))   
+            time.sleep(2)
+            
+            # 입력 버튼 클릭
+            clip_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[4]'))
+            )
+            clip_button.click()
+            time.sleep(2)
+
+            # 기타 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='기타']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+
+            # Reason 입력
+            textarea = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[3]/div/textarea"))
+            )
+            textarea.send_keys(str(row["Reason"]))   
+            time.sleep(2)
+            
+            # 입력 버튼 클릭
+            clip_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[2]/div/div[4]'))
+            )
+            clip_button.click()
+            time.sleep(2)
+
+            # 네 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='네']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+
+            # ▶ 동의하고 접수하기 버튼 클릭 
+            coupang_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{coupang_class}')]/button[text()='▶ 동의하고 접수하기']"))
+            )
+            coupang_button.click()
+            time.sleep(2)
+
+            self.data_frame.at[row_idx, '상태'] = "성공"
             
         except Exception as e:
             print(f"쿠팡이츠 에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"쿠팡이츠 에러 발생: {e}"
+            self.data_frame.at[row_idx, '상태'] = f"쿠팡이츠 에러 발생: {e}"
 
 # Initialize UI
 if __name__ == '__main__':
