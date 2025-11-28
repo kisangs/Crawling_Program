@@ -200,9 +200,19 @@ class CrawlingFinance(tk.Frame):
             date_button.click()
             time.sleep(5)
 
-            #달력 버튼 클릭
-            calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div[2]/div/div[2]/div[1]/div/button/div/svg')))
-            calander_button.click()
+            # 날짜 중 월 버튼 클릭
+            date_month_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CLASS_NAME, 'RadioButtonGroup_b_r4ax_dk6kos3 c_qx9u_13c33de5 c_qx9u_13c33de0')))
+            date_month_button.click()
+            time.sleep(5)
+
+            # 월 중 지난달 버튼 클릭
+            date_last_month_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div[2]/div/div[2]/div[1]/div/div[2]/input')))
+            date_last_month_button.click()
+            time.sleep(5)
+
+            # 적용 버튼 클릭
+            apply_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div[2]/div/div[3]/button')))
+            apply_button.click()
             time.sleep(5)
 
             
