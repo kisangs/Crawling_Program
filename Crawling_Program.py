@@ -3,6 +3,7 @@ import requests
 import tkinter as tk
 import Crawling_Request
 import Takedown_Request
+import Crawling_Finance
 from tkinter import font
 from tkinter import ttk, messagebox
 
@@ -95,6 +96,9 @@ baemin_crawling_btn.pack(padx=10, pady=10, fill="x")
 
 baemin_takedown_btn = ttk.Button(button_frame, text="게시중단 요청 작업", command=lambda: load_frame(Takedown_Request.Takedown), style="TButton")
 baemin_takedown_btn.pack(padx=10, pady=10, fill="x")
+
+baemin_finance_btn = ttk.Button(button_frame, text="결제금액 확인 작업", command=lambda: load_frame(Crawling_Finance.CrawlingFinance), style="TButton")
+baemin_finance_btn.pack(padx=10, pady=10, fill="x")
 
 update_check_btn = ttk.Button(button_frame, text="업데이트 확인", command=check_for_updates, style="TButton")
 update_check_btn.pack(padx=10, pady=10, fill="x", side="bottom")
