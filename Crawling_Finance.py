@@ -148,11 +148,6 @@ class CrawlingFinance(tk.Frame):
         else:
             messagebox.showwarning("경고", "엑셀파일부터 업로드 하셔야죠~")
 
-    #화면상에 Element가 없는 경우 스크롤 하는 기능 
-    def scroll_to_element(self, driver, element):
-        driver.execute_script("arguments[0].scrollIntoView(true);", element)
-        time.sleep(1)
-
     # 선택 옵션 별로 분리하기
     def crawl_site(self, user_id, user_pw, shop_id, row_idx):
         selected_service = self.selected_service.get()
@@ -331,29 +326,35 @@ class CrawlingFinance(tk.Frame):
         start_table = self._ensure_month_on_side(driver, self.start_date, side="left")
         self._click_day_in_table(driver, start_table, self.start_date)
         time.sleep(2)  # 요구사항
+
         # 종료 월/일 (필요 시 말일로 보정)
         safe_end = self._clamp_to_month_last_day(self.end_date)
         if (safe_end.year, safe_end.month) == (self.start_date.year, self.start_date.month):
             end_table = start_table  # 같은 월이면 왼쪽에서
+            # 종료 일자 클릭 전에 화면을 조정하여 적용 버튼이 보이도록 스크롤
+            apply_button_before_click = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//button[.//span[text()="적용"] and @data-atelier-component="Button"]'))
+            )
+            time.sleep(1)  # 스크롤 안정화 대기
         else:
             end_table = self._ensure_month_on_side(driver, safe_end, side="right")  # 다른 월이면 오른쪽에서
+
         self._click_day_in_table(driver, end_table, safe_end)
         time.sleep(3)
-        
-        # 1차 적용 버튼
-        apply_btn_xpath = '/html/body/div[11]/div[2]/div/div/div[2]/div/button'
-        apply_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, apply_btn_xpath))
+
+        # 1차 적용 버튼 
+        # 취소 버튼 옆의 적용 버튼 찾기
+        apply_button_xpath = '//span[text()="취소"]/ancestor::div//span[text()="적용"]/ancestor::button'
+        apply_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, apply_button_xpath))
         )
+        
         try:
-            apply_btn.click()
-            time.sleep(3)
-        except (StaleElementReferenceException, ElementClickInterceptedException):
-            # find it again due to StaleElementReferenceException
-            apply_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, apply_btn_xpath))
-            )
-            driver.execute_script("arguments[0].click();", apply_btn)
+            apply_button.click()
+        except (ElementClickInterceptedException, StaleElementReferenceException):
+            driver.execute_script("arguments[0].click();", apply_button)
+            
+        time.sleep(3)
         
         # 2차 적용 버튼을 찾을 때 동일하게 적용
         apply2_btn_xpath = '//button[.//span[text()="적용"] and @data-atelier-component="Button"]'
@@ -419,7 +420,7 @@ class CrawlingFinance(tk.Frame):
             # 로그인 실패 체크
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 또는 비밀번호가 일치하지 않습니다.")]')
             if login_error:
-                self.data_frame.at[row_idx, '연락처'] = "로그인 실패"
+                self.data_frame.at[row_idx, '에러'] = "로그인 실패"
                 return
             time.sleep(1)
 
@@ -483,10 +484,15 @@ class CrawlingFinance(tk.Frame):
                 option_element.click()
             except ElementClickInterceptedException:
                 driver.execute_script("arguments[0].click();", option_element)
+            time.sleep(2)
 
             # 적용 버튼 클릭
-            apply_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[9]/div[2]/div/div[3]/button')))
-            apply_button.click()
+            apply_button_xpath = '//span[text()="적용"]/ancestor::button[@aria-disabled="false"]'
+            apply_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, apply_button_xpath)))
+            try:
+                apply_button.click()
+            except (ElementClickInterceptedException, StaleElementReferenceException):
+                driver.execute_script("arguments[0].click();", apply_button)
             time.sleep(2)
 
             # 매출금액 수집
@@ -494,7 +500,6 @@ class CrawlingFinance(tk.Frame):
                 finance_element = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "TotalSummary-module__OYdy")]/div[2]/span[contains(@class, "TotalSummary-module__SysK")]/b'))
                 )
-                self.scroll_to_element(driver, finance_element)
                 finance_value = finance_element.text.replace(",", "").replace("원", "").strip()
                 self.data_frame.at[row_idx, '매출금액'] = finance_value
             except Exception as e:
@@ -506,7 +511,6 @@ class CrawlingFinance(tk.Frame):
                 finance_element = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "TotalSummary-module__OYdy")]/div[1]/span[contains(@class, "TotalSummary-module__SysK")]/b'))
                 )
-                self.scroll_to_element(driver, finance_element)
                 finance_value = finance_element.text.replace(",", "").replace("건", "").strip()
                 self.data_frame.at[row_idx, '매출건수'] = finance_value
             except Exception as e:
@@ -521,7 +525,7 @@ class CrawlingFinance(tk.Frame):
     #쿠팡이츠 크롤링 작업
     def crawl_coupang(self, driver, user_id, user_pw, shop_id, row_idx):
         try:
-            driver.get(f"https://store.coupangeats.com/merchant/management/orders/{shop_id}")
+            driver.get("https://store.coupangeats.com/merchant/login")
             time.sleep(3)
             
             # ID 입력
@@ -544,7 +548,7 @@ class CrawlingFinance(tk.Frame):
             # 로그인 실패 시 C 열에 로그인 실패 기록 후 종료 
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 혹은 비밀번호가 일치하지 않습니다.")]')
             if login_error:
-                self.data_frame.at[row_idx, '연락처'] = "로그인 실패"
+                self.data_frame.at[row_idx, '에러'] = "로그인 실패"
                 driver.quit()
                 return
             time.sleep(3)
@@ -593,7 +597,6 @@ class CrawlingFinance(tk.Frame):
                 finance_element = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[3]/div/div[1]/div[2]/span[1]'))
                 )
-                self.scroll_to_element(driver, finance_element)
                 finance_value = finance_element.text.replace(",", "").replace("원", "").strip()
                 self.data_frame.at[row_idx, '매출금액'] = finance_value
             except Exception as e:
@@ -605,7 +608,6 @@ class CrawlingFinance(tk.Frame):
                 finance_element = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[3]/div/div[2]/div[2]/span[1]'))
                 )
-                self.scroll_to_element(driver, finance_element)
                 finance_value = finance_element.text.replace(",", "").replace("건", "").strip()
                 self.data_frame.at[row_idx, '매출건수'] = finance_value
             except Exception as e:
