@@ -60,6 +60,8 @@ class CrawlingFinance(tk.Frame):
         self.coupang_radio.pack(side=tk.LEFT)
         self.yogiyo_radio = ttk.Radiobutton(self.service_frame, text="요기요", variable=self.selected_service, value="요기요", style='TRadiobutton')
         self.yogiyo_radio.pack(side=tk.LEFT)
+        self.ddangyeo_radio = ttk.Radiobutton(self.service_frame, text="땡겨요", variable=self.selected_service, value="땡겨요", style='TRadiobutton')
+        self.ddangyeo_radio.pack(side=tk.LEFT)
 
         # 날짜 선택 프레임
         self.date_frame = ttk.Frame(self, style='TFrame')
@@ -169,6 +171,8 @@ class CrawlingFinance(tk.Frame):
                 self.crawl_coupang(driver, user_id, user_pw, shop_id, row_idx)
             elif selected_service == "요기요":
                 self.crawl_yogiyo(driver, user_id, user_pw, row_idx)
+            elif selected_service == "땡겨요":
+                self.crawl_ddangyeo(driver, user_id, user_pw, row_idx)
         except Exception as e:
             print(f"에러 발생: {e}")
             self.data_frame.at[row_idx, '에러'] = f"에러 발생: {e}"
@@ -394,7 +398,7 @@ class CrawlingFinance(tk.Frame):
     def crawl_baemin(self, driver, user_id, user_pw, shop_id, row_idx):
         try:
             driver.get("https://self.baemin.com/orders/history")
-            time.sleep(3)
+            time.sleep(2)
 
             # ID 입력
             id_input = WebDriverWait(driver, 10).until(
@@ -504,7 +508,7 @@ class CrawlingFinance(tk.Frame):
                 self.data_frame.at[row_idx, '매출금액'] = finance_value
             except Exception as e:
                 self.data_frame.at[row_idx, '매출금액'] = f"에러 발생: {e}"
-            time.sleep(2)
+            time.sleep(1)
 
             # 매출건수 수집
             try:
@@ -515,7 +519,7 @@ class CrawlingFinance(tk.Frame):
                 self.data_frame.at[row_idx, '매출건수'] = finance_value
             except Exception as e:
                 self.data_frame.at[row_idx, '매출건수'] = f"에러 발생: {e}"
-            time.sleep(2)
+            time.sleep(1)
 
         except Exception as e:
             print(f"배달의민족 에러 발생: {e}")
@@ -526,19 +530,19 @@ class CrawlingFinance(tk.Frame):
     def crawl_coupang(self, driver, user_id, user_pw, shop_id, row_idx):
         try:
             driver.get("https://store.coupangeats.com/merchant/login")
-            time.sleep(3)
+            time.sleep(2)
             
             # ID 입력
             id_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[1]/input')))
             id_input.clear()
             id_input.send_keys(user_id)
-            time.sleep(3)
+            time.sleep(1)
             
             # PW 입력
             pw_input = driver.find_element(By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[2]/input')
             pw_input.clear()
             pw_input.send_keys(user_pw)
-            time.sleep(3)
+            time.sleep(1)
             
             # 로그인 버튼 클릭 
             login_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/button')))
@@ -551,26 +555,63 @@ class CrawlingFinance(tk.Frame):
                 self.data_frame.at[row_idx, '에러'] = "로그인 실패"
                 driver.quit()
                 return
-            time.sleep(3)
-            
+            time.sleep(2)
+
             # 사이트 이동 ( 가맹점 화면으로 이동 )
             driver.get(f"https://store.coupangeats.com/merchant/management/orders/{shop_id}")
-            time.sleep(3)
+            time.sleep(2)
             
+            popup_xpaths = [
+                '/html/body/div[4]/div/div/div/button',
+                '/html/body/div[3]/div/div/div/button',
+                '/html/body/div[3]/div/div/div/div[2]/button[2]'
+            ]
+
+            def close_popups(driver, max_round=5):
+                for _ in range(max_round):
+                    closed_any = False
+
+                    for xpath in popup_xpaths:
+                        try:
+                            popup = WebDriverWait(driver, 1).until(
+                                EC.element_to_be_clickable((By.XPATH, xpath))
+                            )
+                            popup.click()
+                            time.sleep(0.4)
+                            closed_any = True
+
+                        except (TimeoutException, StaleElementReferenceException, ElementClickInterceptedException):
+                            try:
+                                popup = WebDriverWait(driver, 1).until(
+                                    EC.presence_of_element_located((By.XPATH, xpath))
+                                )
+                                driver.execute_script("arguments[0].click();", popup)
+                                time.sleep(0.4)
+                                closed_any = True
+                            except:
+                                pass
+
+                    if not closed_any:
+                        break
+
+            #팝업 끄기 실행 
+            close_popups(driver)
+            time.sleep(2)
+
             # 위치 기준 클릭을 통해 팝업 창 닫기 
             action = ActionChains(driver)
-            action.move_by_offset(10, 10).click().perform()
-            time.sleep(3)
+            action.move_by_offset(1, 1).click().perform()
+            time.sleep(2)
             
             # 날짜 지정 버튼 클릭 
             Date_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[1]')))
             Date_button.click()
-            time.sleep(3)
+            time.sleep(2)
             
             # 달력 버튼 클릭 (달력 표시)
             Date_Calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[2]/div[1]/div[1]/div')))
             Date_Calander_button.click()
-            time.sleep(3)
+            time.sleep(2)
             
             # 시작일자 및 종료일자 설정
             start_date = self.start_date
@@ -582,7 +623,7 @@ class CrawlingFinance(tk.Frame):
             # 달력 버튼 클릭 (달력 표시)
             Date_Calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[2]/div[1]/div[2]/div')))
             Date_Calander_button.click()
-            time.sleep(3)
+            time.sleep(2)
 
             # 종료 날짜 달력 요소 선택 및 클릭
             self.select_date(driver, end_date)
@@ -590,7 +631,7 @@ class CrawlingFinance(tk.Frame):
             # 조회 버튼 클릭 
             apply_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/button')))
             apply_button.click()
-            time.sleep(3)
+            time.sleep(2)
 
             # 매출금액 수집
             try:
@@ -665,6 +706,119 @@ class CrawlingFinance(tk.Frame):
         except Exception as e:
             print(f"요기요 에러 발생: {e}")
             self.data_frame.at[row_idx, '에러'] = f"요기요 에러 발생: {e}"
+
+    # 땡겨요 크롤링 작업
+    def crawl_ddangyeo(self, driver, user_id, user_pw, row_idx):
+        try:
+            driver.get("https://boss.ddangyo.com/")
+            time.sleep(2)
+            
+            # ID 입력
+            id_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[2]/ul/li[1]/div[2]/div/input')))
+            id_input.clear()
+            id_input.send_keys(user_id)
+            time.sleep(1)
+            
+            # PW 입력
+            pw_input = driver.find_element(By.XPATH, '/html/body/div[1]/div[2]/ul/li[2]/div[2]/div/input')
+            pw_input.clear()
+            pw_input.send_keys(user_pw)
+            time.sleep(1)
+            
+            # 로그인 버튼 클릭 
+            login_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/input')))
+            login_button.click()
+            time.sleep(2)
+
+            # 로그인 실패 체크
+            login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 또는 비밀번호가 일치하지 않습니다.")]')
+            if login_error:
+                self.data_frame.at[row_idx, '에러'] = "로그인 실패"
+                return
+            time.sleep(1)
+
+            #비밀번호 변경 확인 
+            try:
+                pwchange_button = WebDriverWait(driver, 3).until(EC.visibility_of_element_located((By.XPATH,'/html/body/div[4]/div[2]/div[1]/div/div[2]/input[1]')))
+                pwchange_button.click()
+                time.sleep(1)
+
+            except TimeoutException:
+                pass  # 비밀번호 변경 팝업 없음 → 정상 진행
+            
+            time.sleep(1)
+
+            # 팝업 닫기
+            close_buttons = driver.find_elements(By.XPATH, '//input[@value="닫기"]')
+            for button in close_buttons:
+                if button.is_displayed():
+                    try:
+                        WebDriverWait(driver, 10).until(lambda d: button.is_displayed() and button.is_enabled())
+                        button.click()
+                    except Exception:
+                        try:
+                            driver.execute_script("arguments[0].click();", button)
+                        except Exception:
+                            pass
+                    time.sleep(1)
+
+            # 주문내역 버튼 클릭 
+            list_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'//a[contains(@class,"w2anchor") and normalize-space(text())="주문내역"]')))
+            list_button.click()
+            time.sleep(1)
+
+            # 시작 날짜 입력 (YYYYMMDD)
+            start_date_str = self.start_date.strftime("%Y%m%d")
+            start_date_input = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'/html/body/div[1]/div[3]/div[1]/section/div/div[1]/fieldset/div[1]/div[3]/div[1]/div/div[1]/input')))
+            start_date_input.clear()
+            start_date_input.send_keys(start_date_str)
+            time.sleep(1)
+
+            # 종료 날짜 입력 (YYYYMMDD)
+            end_date_str = self.end_date.strftime("%Y%m%d")
+            end_date_input = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'/html/body/div[1]/div[3]/div[1]/section/div/div[1]/fieldset/div[1]/div[3]/div[3]/div/div[1]/input')))
+            end_date_input.clear()
+            end_date_input.send_keys(end_date_str)
+            time.sleep(1)
+            
+            #조회 버튼 클릭 
+            apply_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/div[1]/section/div/div[1]/fieldset/div[2]/input')))
+            apply_button.click()
+            time.sleep(2)
+
+            # 조회 결과 없음 체크
+            no_data_elements = driver.find_elements(By.XPATH,'//strong[contains(text(),"조회된 내역이 없습니다")]')
+            if no_data_elements and no_data_elements[0].is_displayed():
+                self.data_frame.at[row_idx, '매출금액'] = 0
+                self.data_frame.at[row_idx, '매출건수'] = 0
+                return  
+
+            # 매출금액 수집
+            try:
+                finance_element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[3]/div[1]/section/div/div[2]/div[2]/dl/dd/span[1]'))
+                )
+                finance_value = finance_element.text.replace(",", "").replace("원", "").strip()
+                self.data_frame.at[row_idx, '매출금액'] = finance_value
+            except Exception as e:
+                self.data_frame.at[row_idx, '매출금액'] = f"에러 발생: {e}"
+            time.sleep(1)
+
+            # 매출건수 수집
+            try:
+                finance_element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[3]/div[1]/section/div/div[2]/div[1]/dl/dd/span[1]'))
+                )
+                finance_value = finance_element.text.replace(",", "").replace("건", "").strip()
+                self.data_frame.at[row_idx, '매출건수'] = finance_value
+            except Exception as e:
+                self.data_frame.at[row_idx, '매출건수'] = f"에러 발생: {e}"
+            time.sleep(1)
+
+
+        except Exception as e:
+            print(f"땡겨요 에러 발생: {e}")
+            self.data_frame.at[row_idx, '에러'] = f"땡겨요 에러 발생: {e}"
 
 
 # Initialize UI
