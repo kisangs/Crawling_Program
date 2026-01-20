@@ -271,13 +271,20 @@ class Takedown(tk.Frame):
             driver.get("https://design.happytalkio.com/chatting?siteId=4000000024&siteName=%EC%9A%B0%EC%95%84%ED%95%9C%ED%98%95%EC%A0%9C%EB%93%A4&categoryId=61602&divisionId=200880&partnerId=&shopId=&params=")
             time.sleep(3)
             
-            # ► 리뷰 게시중단 신청 버튼 클릭 
+            # 리뷰게시중단/리뷰케어 신청 버튼 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='► 리뷰 게시중단 신청']"))
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='리뷰게시중단/리뷰케어 신청']"))
             )
             baemin_button.click()
             time.sleep(2)
             
+            # 리뷰게시중단 신청 버튼 클릭 
+            baemin_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='리뷰게시중단 신청']"))
+            )
+            baemin_button.click()
+            time.sleep(2)
+
             # 시작하기 버튼 클릭 
             baemin_button = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='► 시작하기']"))

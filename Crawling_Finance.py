@@ -603,13 +603,13 @@ class CrawlingFinance(tk.Frame):
             action.move_by_offset(1, 1).click().perform()
             time.sleep(2)
             
-            # 날짜 지정 버튼 클릭 
-            Date_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[1]')))
+            # 주문일지정 버튼 클릭 
+            Date_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div/div')))
             Date_button.click()
-            time.sleep(2)
+            time.sleep(1)
             
-            # 달력 버튼 클릭 (달력 표시)
-            Date_Calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[2]/div[1]/div[1]/div')))
+            # 달력 버튼 클릭 (달력 표시)                                                                    
+            Date_Calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[2]/div[1]/div[1]')))
             Date_Calander_button.click()
             time.sleep(2)
             
@@ -621,7 +621,7 @@ class CrawlingFinance(tk.Frame):
             self.select_date(driver, start_date)
 
             # 달력 버튼 클릭 (달력 표시)
-            Date_Calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[2]/div[1]/div[2]/div')))
+            Date_Calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[2]/div[1]/div/div/div/div/div[2]/div[2]/div/div[2]/div[1]/div[2]')))
             Date_Calander_button.click()
             time.sleep(2)
 
