@@ -13,6 +13,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
 class Takedown(tk.Frame):
     def __init__(self, parent):
@@ -140,7 +143,7 @@ class Takedown(tk.Frame):
         options.add_argument('--disable-gpu')
         options.add_argument('--log-level=3')
         
-        driver = Chrome(options=options, use_subprocess=True)
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         try:
             baemin_url = "https://design.happytalkio.com/chatting?siteId=4000000024&siteName=%EC%9A%B0%EC%95%84%ED%95%9C%ED%98%95%EC%A0%9C%EB%93%A4&categoryId=61602&divisionId=200880&partnerId=&shopId=&params="
             driver.get(baemin_url)
@@ -177,7 +180,7 @@ class Takedown(tk.Frame):
         options.add_argument('--disable-gpu')
         options.add_argument('--log-level=3')
         
-        driver = Chrome(options=options, use_subprocess=True)
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         try:
             coupang_url = "https://design.happytalkio.com/chatting?siteId=4000002553&siteName=%EC%BF%A0%ED%8C%A1%EC%9D%B4%EC%B8%A0&categoryId=154858&divisionId=155774&partnerId=&shopId=&params="
             driver.get(coupang_url)
@@ -248,7 +251,7 @@ class Takedown(tk.Frame):
         options.add_argument('--disable-gpu')
         options.add_argument('--log-level=3')
         
-        driver = Chrome(options=options, use_subprocess=True)
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         try:
             # 크롤링 작업 선택 ( 배달의민족 / 쿠팡이츠 / 땡겨요 )
             if selected_service == "배달의민족":
