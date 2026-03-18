@@ -4,6 +4,7 @@ import tkinter as tk
 import Crawling_Request
 import Takedown_Request
 import Crawling_Finance
+import Crawling_Finance_Daily
 from tkinter import font
 from tkinter import ttk, messagebox
 
@@ -91,14 +92,17 @@ button_frame.pack(side="left", fill="y", padx=10, pady=10)
 content_frame = tk.Frame(main_frame, bg="#1e1e1e", bd=2, relief="solid")
 content_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-baemin_crawling_btn = ttk.Button(button_frame, text="정보 크롤링 작업", command=lambda: load_frame(Crawling_Request.Crawling), style="TButton")
+baemin_crawling_btn = ttk.Button(button_frame, text="정보 크롤링", command=lambda: load_frame(Crawling_Request.Crawling), style="TButton")
 baemin_crawling_btn.pack(padx=10, pady=10, fill="x")
 
-baemin_takedown_btn = ttk.Button(button_frame, text="게시중단 요청 작업", command=lambda: load_frame(Takedown_Request.Takedown), style="TButton")
+baemin_takedown_btn = ttk.Button(button_frame, text="게시중단 요청", command=lambda: load_frame(Takedown_Request.Takedown), style="TButton")
 baemin_takedown_btn.pack(padx=10, pady=10, fill="x")
 
-baemin_finance_btn = ttk.Button(button_frame, text="결제금액 확인 작업", command=lambda: load_frame(Crawling_Finance.CrawlingFinance), style="TButton")
+baemin_finance_btn = ttk.Button(button_frame, text="결제금액 확인", command=lambda: load_frame(Crawling_Finance.CrawlingFinance), style="TButton")
 baemin_finance_btn.pack(padx=10, pady=10, fill="x")
+
+baemin_finance_Daily_btn = ttk.Button(button_frame, text="일자별 결제금액 확인", command=lambda: load_frame(Crawling_Finance_Daily.CrawlingFinance), style="TButton")
+baemin_finance_Daily_btn.pack(padx=10, pady=10, fill="x")
 
 update_check_btn = ttk.Button(button_frame, text="업데이트 확인", command=check_for_updates, style="TButton")
 update_check_btn.pack(padx=10, pady=10, fill="x", side="bottom")
