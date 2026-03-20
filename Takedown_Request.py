@@ -57,34 +57,6 @@ class Takedown(tk.Frame):
         style.map('Treeview', background=[('selected', '#3c3c3c')], foreground=[('selected', '#ffffff')])
         style.configure('Treeview.Heading', background='#3c3c3c', foreground='#ffffff')
         style.configure('TEntry', fieldbackground='#ffffff', background='#2b2b2b', foreground='#000000')
-
-        #오류 원인 분석 
-        def get_user_friendly_error(self, step, exception):
-            if isinstance(exception, TimeoutException):
-                if "클릭" in step:
-                    return f"{step} 단계에서 버튼이 나타나지 않거나 클릭 가능한 상태가 되지 않았습니다"
-                elif "입력" in step:
-                    return f"{step} 단계에서 입력창이 나타나지 않았습니다"
-                else:
-                    return f"{step} 단계에서 페이지 또는 요소 응답 시간이 초과되었습니다"
-
-            elif isinstance(exception, NoSuchElementException):
-                return f"{step} 단계에서 필요한 화면 요소를 찾지 못했습니다"
-
-            elif isinstance(exception, ElementClickInterceptedException):
-                return f"{step} 단계에서 다른 요소에 가려 클릭할 수 없었습니다"
-
-            elif isinstance(exception, ElementNotInteractableException):
-                return f"{step} 단계에서 요소가 비활성화 상태이거나 입력/클릭할 수 없었습니다"
-
-            elif isinstance(exception, StaleElementReferenceException):
-                return f"{step} 단계에서 화면이 갱신되어 요소를 다시 찾아야 했습니다"
-
-            elif isinstance(exception, WebDriverException):
-                return f"{step} 단계에서 브라우저 동작 중 오류가 발생했습니다"
-
-            else:
-                return f"{step} 단계에서 알 수 없는 오류가 발생했습니다"
         
         # 엑셀 파일 업로드 버튼 ( 배달의민족 / 쿠팡이츠 ) 생성
         self.upload_frame = ttk.Frame(self, style='TFrame')
@@ -163,6 +135,34 @@ class Takedown(tk.Frame):
         self.treeview = ttk.Treeview(self.treeview_frame, style='Treeview')
         self.treeview.pack(fill="both", expand=True)
 
+    #오류 원인 분석 
+    def get_user_friendly_error(self, step, exception):
+        if isinstance(exception, TimeoutException):
+            if "클릭" in step:
+                return f"{step} 단계에서 버튼이 나타나지 않거나 클릭 가능한 상태가 되지 않았습니다"
+            elif "입력" in step:
+                return f"{step} 단계에서 입력창이 나타나지 않았습니다"
+            else:
+                return f"{step} 단계에서 페이지 또는 요소 응답 시간이 초과되었습니다"
+
+        elif isinstance(exception, NoSuchElementException):
+            return f"{step} 단계에서 필요한 화면 요소를 찾지 못했습니다"
+
+        elif isinstance(exception, ElementClickInterceptedException):
+            return f"{step} 단계에서 다른 요소에 가려 클릭할 수 없었습니다"
+
+        elif isinstance(exception, ElementNotInteractableException):
+            return f"{step} 단계에서 요소가 비활성화 상태이거나 입력/클릭할 수 없었습니다"
+
+        elif isinstance(exception, StaleElementReferenceException):
+            return f"{step} 단계에서 화면이 갱신되어 요소를 다시 찾아야 했습니다"
+
+        elif isinstance(exception, WebDriverException):
+            return f"{step} 단계에서 브라우저 동작 중 오류가 발생했습니다"
+
+        else:
+            return f"{step} 단계에서 알 수 없는 오류가 발생했습니다"
+            
     #화면상의 엑셀 상의 데이터를 삭제하는 작업 진행 
     def clear_treeview(self):
         self.treeview.delete(*self.treeview.get_children())
@@ -437,6 +437,7 @@ class Takedown(tk.Frame):
             step = "초기 버튼 로딩 확인"
             WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, '//li[@data-idx="1"]/button')))
+            time.sleep(2)
             
             # 리뷰게시중단/리뷰케어 신청 버튼 클릭 
             step = "리뷰게시중단/리뷰케어 신청 버튼 클릭"
