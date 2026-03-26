@@ -526,6 +526,14 @@ class Takedown(tk.Frame):
             )
             baemin_button.click()
             time.sleep(2)
+
+            # 종료하기 클릭
+            step = "종료하기 버튼 클릭"
+            baemin_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, '{baemin_class}')]/button[text()='► 종료하기']"))
+            )
+            baemin_button.click()
+            time.sleep(2)
             
             self.data_frame.at[row_idx, '상태'] = "성공"
             self.data_frame.at[row_idx, '에러'] = ""
