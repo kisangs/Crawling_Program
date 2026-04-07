@@ -28,7 +28,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 
-class CrawlingFinance(tk.Frame):
+class CrawlingFinance_Daily(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.file_path = None
@@ -885,6 +885,6 @@ if __name__ == '__main__':
     root = tk.Tk()
     root.title("크롤링 프로그램")
     root.geometry("1000x600")
-    frame = CrawlingFinance(root)
+    frame = CrawlingFinance_Daily(root)
     frame.pack(fill="both", expand=True)
     root.mainloop()

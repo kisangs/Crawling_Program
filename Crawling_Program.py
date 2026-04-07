@@ -101,7 +101,7 @@ baemin_takedown_btn.pack(padx=10, pady=10, fill="x")
 baemin_finance_btn = ttk.Button(button_frame, text="결제금액 확인", command=lambda: load_frame(Crawling_Finance.CrawlingFinance), style="TButton")
 baemin_finance_btn.pack(padx=10, pady=10, fill="x")
 
-baemin_finance_Daily_btn = ttk.Button(button_frame, text="일자별 결제금액 확인", command=lambda: load_frame(Crawling_Finance_Daily.CrawlingFinance), style="TButton")
+baemin_finance_Daily_btn = ttk.Button(button_frame, text="일자별 결제금액 확인", command=lambda: load_frame(Crawling_Finance_Daily.CrawlingFinance_Daily), style="TButton")
 baemin_finance_Daily_btn.pack(padx=10, pady=10, fill="x")
 
 update_check_btn = ttk.Button(button_frame, text="업데이트 확인", command=check_for_updates, style="TButton")
