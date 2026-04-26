@@ -1,351 +1,699 @@
 import time
-import pyautogui
+import json
 import threading
+import logging
+import traceback
+from io import BytesIO
+
 import pandas as pd
+import requests
 import tkinter as tk
-from tkinter import ttk, filedialog
-import undetected_chromedriver as uc
-from undetected_chromedriver import Chrome, ChromeOptions
-from tkinter import filedialog, messagebox
+from tkinter import ttk, messagebox
+
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
-class Crawling(tk.Frame):
+from selenium.common.exceptions import (
+    TimeoutException,
+    NoSuchElementException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+    StaleElementReferenceException,
+    WebDriverException
+)
+
+
+class MultiCrawlerApp(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.file_path = None
-        self.data_frame = None
-        self.progress_var = tk.DoubleVar()
-        self.selected_service = tk.StringVar(value="배달의민족")
-        
-        # 다크 모드 스타일 설정
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # 다크 모드 스타일 설정
-        style.configure('TFrame', background='#2b2b2b')
-        style.configure('TButton', background='#ffffff', foreground='#000000', font=('Helvetica', 12, 'bold'))
-        style.configure('TLabel', background='#2b2b2b', foreground='#ffffff')
-        style.configure('TProgressbar', foreground='#00ff00', background='#3c3c3c')
-        style.configure('TProgressbar.Horizontal.TProgressbar', troughcolor='#3c3c3c', background='#00ff00')
-        style.configure('Treeview', background='#2b2b2b', foreground='#ffffff', fieldbackground='#2b2b2b', bordercolor='#ffffff')
-        style.map('Treeview', background=[('selected', '#3c3c3c')], foreground=[('selected', '#ffffff')])
-        style.configure('Treeview.Heading', background='#3c3c3c', foreground='#ffffff')
 
-        #엑셀 파일 업로드 버튼 생성
-        self.upload_button = ttk.Button(self, text="엑셀 파일 업로드", command=self.upload_file, style='TButton')
-        self.upload_button.pack(pady=10)
-        
-        #프레임 생성
-        self.service_frame = ttk.Frame(self, style='TFrame')
-        self.service_frame.pack(pady=10)
-        
-        self.baemin_radio = ttk.Radiobutton(self.service_frame, text="배달의민족", variable=self.selected_service, value="배달의민족", style='TRadiobutton')
-        self.baemin_radio.pack(side=tk.LEFT)
-        
-        self.coupang_radio = ttk.Radiobutton(self.service_frame, text="쿠팡이츠", variable=self.selected_service, value="쿠팡이츠", style='TRadiobutton')
-        self.coupang_radio.pack(side=tk.LEFT)
-        
-        self.ddangyo_radio = ttk.Radiobutton(self.service_frame, text="땡겨요", variable=self.selected_service, value="땡겨요", style='TRadiobutton')
-        self.ddangyo_radio.pack(side=tk.LEFT)
-        
-        self.start_button = ttk.Button(self, text="시작", command=self.start_thread, style='TButton')
-        self.start_button.pack(pady=10)
-        
-        #진행률 ( % ) 확인 용
-        self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100, style='TProgressbar.Horizontal.TProgressbar')
-        self.progress_bar.pack(pady=10, padx=10, fill=tk.X)
-        
-        self.progress_label = ttk.Label(self, text="진행 상황: 0%", style='TLabel')
-        self.progress_label.pack(pady=10)
-        
-        self.treeview_frame = ttk.Frame(self, style='TFrame')
-        self.treeview_frame.pack(fill="both", expand=True)
-        
-        self.treeview = ttk.Treeview(self.treeview_frame, style='Treeview')
+        self.data_frame = None
+        self.is_running = False
+        self.progress_var = tk.DoubleVar()
+        self.current_status_var = tk.StringVar(value="대기 중")
+
+        # 설정값
+        self.google_xlsx_url = "https://docs.google.com/spreadsheets/d/1iCMikJwc3FqxNtly8zkh6GFdX4luvs155TH2mbsVxd0/export?format=xlsx"
+        self.source_sheet_name = "List"
+        self.result_sheet_map = {
+        "배달의민족": "배달의민족_결과",
+        "요기요": "요기요_결과",
+        "쿠팡이츠": "쿠팡이츠_결과",
+        "땡겨요": "땡겨요_결과"
+        }
+        self.apps_script_url = "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+
+        # 서비스별 크롤링 설정
+        self.crawl_settings = {
+            "배달의민족": {
+                "가맹점명": True,
+                "샵넘버": True,
+                "광고서비스사용유무": True,
+                "주문접수채널": True,
+                "연락처": True,
+                "사업자번호": True,
+                "주소": True
+            },
+            "요기요": {
+                "가맹점명": True,
+                "샵넘버": True,
+                "연락처": True,
+                "사업자번호": True,
+                "제휴포스사용여부": True
+            },
+            "쿠팡이츠": {
+                "가게명": True,
+                "샵넘버": True,
+                "상태": True
+            },
+            "땡겨요": {
+                "가게명": True,
+                "샵넘버": True
+            }
+        }
+
+        self.setting_vars = {}
+
+        self.init_logging()
+        self.init_style()
+        self.create_widgets()
+
+    # --------------------------
+    # 초기화
+    # --------------------------
+    def init_logging(self):
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s"
+        )
+
+    def init_style(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        style.configure("TFrame", background="#2b2b2b")
+        style.configure("TLabel", background="#2b2b2b", foreground="#ffffff")
+        style.configure("TButton", background="#ffffff", foreground="#000000", font=("Helvetica", 10, "bold"))
+        style.configure("Treeview", background="#2b2b2b", foreground="#ffffff", fieldbackground="#2b2b2b")
+        style.configure("Treeview.Heading", background="#3c3c3c", foreground="#ffffff")
+        style.configure("TProgressbar.Horizontal.TProgressbar",
+                        troughcolor="#3c3c3c", background="#00ff00")
+
+    def create_widgets(self):
+        self.configure(bg="#2b2b2b")
+
+        top_frame = ttk.Frame(self)
+        top_frame.pack(fill="x", padx=10, pady=10)
+
+        self.load_button = ttk.Button(top_frame, text="구글 시트 불러오기", command=self.load_sheet_from_google)
+        self.load_button.pack(side="left", padx=5)
+
+        self.setting_button = ttk.Button(top_frame, text="설정", command=self.open_settings_window)
+        self.setting_button.pack(side="left", padx=5)
+
+        self.start_button = ttk.Button(top_frame, text="시작", command=self.start_thread)
+        self.start_button.pack(side="left", padx=5)
+
+        self.retry_button = ttk.Button(top_frame, text="결과 재전송", command=self.retry_upload_results)
+        self.retry_button.pack(side="left", padx=5)
+
+        self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100,
+                                            style="TProgressbar.Horizontal.TProgressbar")
+        self.progress_bar.pack(fill="x", padx=10, pady=5)
+
+        self.progress_label = ttk.Label(self, text="진행 상황: 0%")
+        self.progress_label.pack(anchor="w", padx=10)
+
+        self.current_status_label = ttk.Label(self, textvariable=self.current_status_var)
+        self.current_status_label.pack(anchor="w", padx=10, pady=(0, 10))
+
+        self.treeview_frame = ttk.Frame(self)
+        self.treeview_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        self.treeview = ttk.Treeview(self.treeview_frame)
         self.treeview.pack(fill="both", expand=True)
 
-    #화면상의 엑셀 상의 데이터를 삭제하는 작업 진행 
+        log_frame = ttk.Frame(self)
+        log_frame.pack(fill="both", padx=10, pady=10)
+
+        ttk.Label(log_frame, text="실행 로그").pack(anchor="w")
+
+        self.log_text = tk.Text(log_frame, height=10, bg="#1e1e1e", fg="#ffffff", insertbackground="#ffffff")
+        self.log_text.pack(fill="both", expand=True)
+
+    # --------------------------
+    # UI 유틸
+    # --------------------------
+    def safe_ui(self, func, *args, **kwargs):
+        self.after(0, lambda: func(*args, **kwargs))
+
+    def write_log(self, message):
+        logging.info(message)
+
+        def _append():
+            self.log_text.insert(tk.END, f"{message}\n")
+            self.log_text.see(tk.END)
+
+        self.safe_ui(_append)
+
     def clear_treeview(self):
         self.treeview.delete(*self.treeview.get_children())
 
-    #엑셀 업로드 기능 
-    def upload_file(self):
-        self.file_path = filedialog.askopenfilename(filetypes=[("Excel files", ".xlsx .xls")])
-        if self.file_path:
-            self.data_frame = pd.read_excel(self.file_path)
-            self.display_excel()
+    def display_data(self):
+        if self.data_frame is None:
+            return
 
-    #화면 상에 엑셀을 표시 (Treeview)
-    def display_excel(self):
-        if self.data_frame is not None:
-            self.clear_treeview()
-            self.treeview["column"] = list(self.data_frame.columns)
-            self.treeview["show"] = "headings"
-            for column in self.treeview["columns"]:
-                self.treeview.heading(column, text=column)
-            for row in self.data_frame.to_numpy().tolist():
-                self.treeview.insert("", "end", values=row)
+        self.clear_treeview()
+        self.treeview["columns"] = list(self.data_frame.columns)
+        self.treeview["show"] = "headings"
 
-    #진행중인 행을 표시할 수 있게 하이라이트 표시 
-    def highlight_row(self, row_id):
-        for item in self.treeview.get_children():
-            self.treeview.item(item, tags="")
-        self.treeview.item(row_id, tags=("highlight",))
-        self.treeview.tag_configure("highlight", background="yellow", foreground="black")
+        for col in self.treeview["columns"]:
+            self.treeview.heading(col, text=col)
+            self.treeview.column(col, width=120, anchor="center")
 
+        for row in self.data_frame.fillna("").to_numpy().tolist():
+            self.treeview.insert("", "end", values=row)
+
+    def refresh_treeview_row(self, row_idx):
+        children = self.treeview.get_children()
+        if row_idx >= len(children):
+            return
+        values = self.data_frame.iloc[row_idx].fillna("").tolist()
+        self.treeview.item(children[row_idx], values=values)
+
+    def highlight_row(self, row_idx):
+        children = self.treeview.get_children()
+        for item in children:
+            self.treeview.item(item, tags=())
+        if 0 <= row_idx < len(children):
+            self.treeview.item(children[row_idx], tags=("highlight",))
+            self.treeview.tag_configure("highlight", background="yellow", foreground="black")
+
+    # --------------------------
+    # 설정창
+    # --------------------------
+    def open_settings_window(self):
+        settings_window = tk.Toplevel(self)
+        settings_window.title("크롤링 설정")
+        settings_window.geometry("500x500")
+        settings_window.configure(bg="#2b2b2b")
+        settings_window.transient(self.winfo_toplevel())
+        settings_window.grab_set()
+
+        notebook = ttk.Notebook(settings_window)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.setting_vars = {}
+
+        for service, items in self.crawl_settings.items():
+            frame = ttk.Frame(notebook)
+            notebook.add(frame, text=service)
+
+            self.setting_vars[service] = {}
+
+            row_num = 0
+            for item_name, enabled in items.items():
+                var = tk.BooleanVar(value=enabled)
+                self.setting_vars[service][item_name] = var
+
+                chk = tk.Checkbutton(
+                    frame,
+                    text=item_name,
+                    variable=var,
+                    bg="#2b2b2b",
+                    fg="#ffffff",
+                    selectcolor="#3c3c3c",
+                    activebackground="#2b2b2b",
+                    activeforeground="#ffffff"
+                )
+                chk.grid(row=row_num, column=0, sticky="w", padx=20, pady=8)
+                row_num += 1
+
+        btn_frame = ttk.Frame(settings_window)
+        btn_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="저장", command=lambda: self.save_settings(settings_window)).pack(side="right", padx=5)
+        ttk.Button(btn_frame, text="취소", command=settings_window.destroy).pack(side="right", padx=5)
+
+    def save_settings(self, window):
+        for service, items in self.setting_vars.items():
+            for item_name, var in items.items():
+                self.crawl_settings[service][item_name] = var.get()
+
+        self.write_log(f"설정 저장 완료: {json.dumps(self.crawl_settings, ensure_ascii=False)}")
+        messagebox.showinfo("완료", "설정이 저장되었습니다.")
+        window.destroy()
+
+    # --------------------------
+    # 데이터 로드
+    # --------------------------
+    def load_sheet_from_google(self):
+        try:
+            self.write_log("구글 스프레드시트 다운로드 시작")
+            self.current_status_var.set("구글 시트 다운로드 중...")
+
+            response = requests.get(self.google_xlsx_url, timeout=30)
+            response.raise_for_status()
+
+            excel_data = BytesIO(response.content)
+            self.data_frame = pd.read_excel(excel_data, sheet_name=self.source_sheet_name)
+            self.data_frame.columns = self.data_frame.columns.astype(str).str.strip()
+
+            self.ensure_columns()
+            self.display_data()
+
+            self.current_status_var.set("불러오기 완료")
+            self.write_log(f"{self.source_sheet_name} 시트 로드 완료 - {len(self.data_frame)}건")
+            messagebox.showinfo("완료", "구글 시트 데이터를 불러왔습니다.")
+
+        except Exception as e:
+            self.write_log(f"구글 시트 로드 실패: {e}")
+            messagebox.showerror("오류", f"구글 시트 데이터 불러오기 실패:\n{e}")
+
+    def ensure_columns(self):
+        if self.data_frame is None:
+            return
+
+        required_columns = ["구분", "ID", "PW",]
+
+        for col in required_columns:
+            if col not in self.data_frame.columns:
+                self.data_frame[col] = ""
+
+    # --------------------------
+    # 업로드
+    # --------------------------
+    def upload_results_to_apps_script(self):
+        try:
+            if self.data_frame is None or self.data_frame.empty:
+                messagebox.showwarning("경고", "업로드할 데이터가 없습니다.")
+                return
+
+            upload_df = self.data_frame.copy().fillna("")
+
+            if "구분" not in upload_df.columns:
+                raise Exception("업로드 데이터에 '구분' 컬럼이 없습니다.")
+
+            grouped = upload_df.groupby("구분", dropna=False)
+
+            success_count = 0
+            fail_count = 0
+
+            for service_type, group_df in grouped:
+                service_type = str(service_type).strip()
+
+                if not service_type:
+                    self.write_log("구분값이 비어 있는 데이터는 업로드하지 않습니다.")
+                    continue
+
+                sheet_name = self.result_sheet_map.get(service_type)
+                if not sheet_name:
+                    self.write_log(f"구분값 '{service_type}'에 대한 결과 시트 매핑이 없습니다.")
+                    fail_count += 1
+                    continue
+
+                payload = {
+                    "sheetName": sheet_name,
+                    "mode": "append",
+                    "columns": list(group_df.columns),
+                    "rows": group_df.astype(str).values.tolist()
+                }
+
+                self.write_log(f"[업로드 시작] {service_type} → {sheet_name} / {len(group_df)}건")
+
+                try:
+                    response = requests.post(self.apps_script_url, json=payload, timeout=60)
+                    response.raise_for_status()
+
+                    result = response.json()
+                    if result.get("success"):
+                        self.write_log(f"[업로드 성공] {sheet_name} / {len(group_df)}건")
+                        success_count += 1
+                    else:
+                        msg = result.get("message", "알 수 없는 오류")
+                        self.write_log(f"[업로드 실패] {sheet_name} / {msg}")
+                        fail_count += 1
+
+                except Exception as sub_e:
+                    self.write_log(f"[업로드 오류] {sheet_name} / {sub_e}")
+                    fail_count += 1
+
+            if fail_count == 0:
+                messagebox.showinfo("업로드 완료", f"모든 결과 업로드 완료 ({success_count}개 탭)")
+            else:
+                messagebox.showwarning("업로드 일부 실패", f"성공: {success_count} / 실패: {fail_count}")
+
+        except Exception as e:
+            self.write_log(f"결과 업로드 오류: {e}")
+            messagebox.showerror("업로드 오류", f"Apps Script 업로드 실패:\n{e}")
+
+    def retry_upload_results(self):
+        if self.data_frame is None:
+            messagebox.showwarning("경고", "재전송할 데이터가 없습니다.")
+            return
+
+        if not messagebox.askyesno("확인", "현재 결과를 다시 업로드하시겠습니까?"):
+            return
+
+        self.upload_results_to_apps_script()
+
+    # --------------------------
+    # 실행
+    # --------------------------
     def start_thread(self):
-        threading.Thread(target=self.start_crawling).start()
+        if self.is_running:
+            messagebox.showwarning("안내", "이미 실행 중입니다.")
+            return
+
+        if self.data_frame is None or self.data_frame.empty:
+            messagebox.showwarning("경고", "먼저 데이터를 불러와주세요.")
+            return
+
+        self.is_running = True
+        self.start_button.config(state="disabled")
+        threading.Thread(target=self.start_crawling, daemon=True).start()
 
     def start_crawling(self):
-        if self.data_frame is not None:
+        try:
             total_rows = len(self.data_frame.index)
+            self.write_log("전체 크롤링 시작")
+
             for index, row in self.data_frame.iterrows():
-                item_id = self.treeview.get_children()[index]  # 해당 행의 ID
-                self.highlight_row(item_id)  # 현재 행을 하이라이트
-                
-                self.crawl_site(row["ID"], row["PW"], index)
-                
-                progress = (index + 1) / total_rows * 100
-                self.progress_var.set(progress)
-                self.progress_label.config(text=f"진행 상황: {progress:.2f}%")
-                self.update_idletasks()
-            
-            #데이터를 엑셀에 저장 
-            self.data_frame.to_excel(self.file_path, index=False)
+                service_type = str(row.get("구분", "")).strip()
+                self.safe_ui(self.highlight_row, index)
+                self.safe_ui(self.current_status_var.set, f"{index + 1}/{total_rows} 처리 중 - {service_type}")
 
-            #데이터 저장 후 화면에 다시 표출
-            self.display_excel()
+                start_time = time.time()
+                self.write_log(f"[{index + 1}/{total_rows}] 시작 - {service_type}")
 
-            messagebox.showinfo("완료", "완료됨~")
-        else:
-            messagebox.showwarning("경고", "엑셀파일부터 업로드 하셔야죠~")
+                try:
+                    self.process_row(row, index)
+                except Exception as e:
+                    self.set_row_result(index, status="실패", step="행 처리", error=str(e))
+                    self.write_log(f"[행 {index + 1}] 예외 발생: {e}")
 
-    def scroll_to_element(self, driver, element):
-        driver.execute_script("arguments[0].scrollIntoView(true);", element)
-        time.sleep(1)
+                elapsed = round(time.time() - start_time, 2)
+                self.data_frame.at[index, "처리시간"] = elapsed
+                self.data_frame.at[index, "처리일시"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    def crawl_site(self, user_id, user_pw, row_idx):
-        selected_service = self.selected_service.get()
-        options = ChromeOptions()
+                progress = ((index + 1) / total_rows) * 100
+                self.safe_ui(self.progress_var.set, progress)
+                self.safe_ui(self.progress_label.config, text=f"진행 상황: {progress:.2f}%")
+                self.safe_ui(self.refresh_treeview_row, index)
+
+            self.safe_ui(self.current_status_var.set, "결과 업로드 중...")
+            self.upload_results_to_apps_script()
+
+            self.safe_ui(self.current_status_var.set, "작업 완료")
+            self.write_log("전체 작업 완료")
+            self.safe_ui(messagebox.showinfo, "완료", "전체 작업이 완료되었습니다.")
+
+        except Exception as e:
+            self.write_log(f"전체 실행 오류: {e}\n{traceback.format_exc()}")
+            self.safe_ui(messagebox.showerror, "오류", f"실행 중 오류 발생:\n{e}")
+        finally:
+            self.is_running = False
+            self.safe_ui(self.start_button.config, state="normal")
+
+    # --------------------------
+    # 행 처리 분기
+    # --------------------------
+    def process_row(self, row, row_idx):
+        service_type = str(row.get("구분", "")).strip()
+
+        if not service_type:
+            self.set_row_result(row_idx, status="실패", step="구분 확인", error="구분값이 비어 있습니다.")
+            return
+
+        driver = self.create_driver()
+
+        try:
+            if service_type == "배달의민족":
+                self.process_baemin(driver, row, row_idx)
+            elif service_type == "요기요":
+                self.process_yogiyo(driver, row, row_idx)
+            elif service_type == "쿠팡이츠":
+                self.process_coupang(driver, row, row_idx)
+            elif service_type == "땡겨요":
+                self.process_ddangyo(driver, row, row_idx)
+            else:
+                self.set_row_result(row_idx, status="실패", step="구분 분기", error=f"지원하지 않는 구분값: {service_type}")
+        finally:
+            try:
+                driver.quit()
+            except:
+                pass
+
+    # --------------------------
+    # 공통
+    # --------------------------
+    def create_driver(self):
+        options = webdriver.ChromeOptions()
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-popup-blocking")
-        options.add_argument("--profile-directory=Default")
         options.add_argument("--disable-plugins-discovery")
         options.add_argument("--incognito")
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--log-level=3')
-        
-        driver = Chrome(options=options, use_subprocess=True)
-        try:
-            # 크롤링 작업 선택 ( 배달의민족 / 쿠팡이츠 / 땡겨요 )
-            if selected_service == "배달의민족":
-                self.crawl_baemin(driver, user_id, user_pw, row_idx)
-            elif selected_service == "쿠팡이츠":
-                self.crawl_coupang(driver, user_id, user_pw, row_idx)
-            elif selected_service == "땡겨요":
-                self.crawl_ddangyo(driver, user_id, user_pw, row_idx)
-        except Exception as e:
-            print(f"에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"에러 발생: {e}"
-        finally:
-            driver.quit()
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--log-level=3")
 
-    # 배민 크롤링 작업
-    def crawl_baemin(self, driver, user_id, user_pw, row_idx):
+        driver = webdriver.Chrome(
+            service=ChromeService(ChromeDriverManager().install()),
+            options=options
+        )
+        driver.set_window_size(1400, 900)
+        return driver
+
+    def get_user_friendly_error(self, step, exception):
+        if isinstance(exception, TimeoutException):
+            return f"{step} 단계에서 응답 시간이 초과되었습니다."
+        elif isinstance(exception, NoSuchElementException):
+            return f"{step} 단계에서 필요한 요소를 찾지 못했습니다."
+        elif isinstance(exception, ElementClickInterceptedException):
+            return f"{step} 단계에서 다른 요소에 가려 클릭할 수 없었습니다."
+        elif isinstance(exception, ElementNotInteractableException):
+            return f"{step} 단계에서 요소를 조작할 수 없었습니다."
+        elif isinstance(exception, StaleElementReferenceException):
+            return f"{step} 단계에서 화면 갱신으로 요소 참조가 끊어졌습니다."
+        elif isinstance(exception, WebDriverException):
+            return f"{step} 단계에서 브라우저 오류가 발생했습니다."
+        else:
+            return f"{step} 단계에서 오류 발생: {exception}"
+
+    def set_row_result(self, row_idx, status=None, step=None, error=None, **extra):
+        if status is not None:
+            self.data_frame.at[row_idx, "상태"] = status
+        if step is not None:
+            self.data_frame.at[row_idx, "작업단계"] = step
+        if error is not None:
+            self.data_frame.at[row_idx, "에러"] = error
+
+        for key, value in extra.items():
+            if key not in self.data_frame.columns:
+                self.data_frame[key] = ""
+            self.data_frame.at[row_idx, key] = value
+
+    # --------------------------
+    # 서비스별 처리
+    # --------------------------
+
+    #배달의 민족 처리 함수
+    def process_baemin(self, driver, row, row_idx):
+        step = "초기화"
         try:
-            #배민 사이트 접속 
+            settings = self.crawl_settings["배달의민족"]
+            user_id = str(row.get("ID", "")).strip()
+            user_pw = str(row.get("PW", "")).strip()
+
+            self.write_log(f"[행 {row_idx + 1}] 배달의민족 시작")
+
+            step = "배민 로그인 페이지 접속"
+            self.set_row_result(row_idx, step=step)
             driver.get("https://self.baemin.com/mypage/owner")
-            time.sleep(5)
-            
-            #ID 입력
-            id_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '/html/body/div[2]/div[1]/div/div/form/div[1]/span/input')))
+
+            step = "아이디 입력"
+            self.set_row_result(row_idx, step=step)
+            id_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@type="text"]'))
+            )
             id_input.clear()
             id_input.send_keys(user_id)
-            time.sleep(5)
 
-            #PW 입력
-            pw_input = driver.find_element(By.XPATH, '/html/body/div[2]/div[1]/div/div/form/div[2]/span/input')
+            step = "비밀번호 입력"
+            self.set_row_result(row_idx, step=step)
+            pw_input = driver.find_element(By.XPATH, '//input[@type="password"]')
             pw_input.clear()
             pw_input.send_keys(user_pw)
-            time.sleep(5)
 
-            #로그인 버튼 클릭
-            login_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div[1]/div/div/form/button')))
+            step = "로그인 버튼 클릭"
+            self.set_row_result(row_idx, step=step)
+            login_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//form//button'))
+            )
             login_button.click()
-            time.sleep(5)
+            time.sleep(3)
 
-            #로그인 실패 시 C열에 로그인 실패 기록 후 종료 
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 또는 비밀번호가 일치하지 않습니다.")]')
             if login_error:
-                self.data_frame.at[row_idx, '연락처'] = "로그인 실패"
-                driver.quit()
+                self.set_row_result(row_idx, status="실패", step="로그인 확인", error="로그인 실패")
                 return
-            time.sleep(5)
-            
-            #팝업 창 닫기 
-            close_buttons = driver.find_elements(By.XPATH, '//button[@aria-label="닫기"]')
-            for button in close_buttons:
-                if button.is_displayed():
-                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(button)).click()
-                    time.sleep(5)
-            
-            # 연락처 정보 수집 
-            try:
-                contact_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/form/div/div/div[2]/div')
-                self.scroll_to_element(driver, contact_element)
-                contact_value = contact_element.text
-                self.data_frame.at[row_idx, '연락처'] = contact_value
-            except Exception as e:
-                self.data_frame.at[row_idx, '연락처'] = f"에러 발생: {e}"
-            time.sleep(5)
-            
-            # 사업자번호 수집
-            try:
-                business_number_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[1]/div[6]/div[5]/div')
-                self.scroll_to_element(driver, business_number_element)
-                business_number_value = business_number_element.text
-                self.data_frame.at[row_idx, '사업자번호'] = business_number_value
-            except Exception as e:
-                self.data_frame.at[row_idx, '사업자번호'] = f"에러 발생: {e}"
-            time.sleep(5)
-            
-            # 주소 수집 
-            try:
-                address_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[1]/div[6]/div[12]/dl/dd[2]')
-                self.scroll_to_element(driver, address_element)
-                address_value = address_element.text
-                self.data_frame.at[row_idx, '주소'] = address_value
-            except Exception as e:
-                self.data_frame.at[row_idx, '주소'] = f"에러 발생: {e}"
-            time.sleep(5)
-            
-            #사이트 이동 ( 홈 화면으로 이동 )
-            driver.get("https://self.baemin.com/")
-            time.sleep(5)
-            
-            #팝업 창 닫기 
-            close_buttons = driver.find_elements(By.XPATH, '//button[@aria-label="닫기"]')
-            for button in close_buttons:
-                if button.is_displayed():
-                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(button)).click()
-                    time.sleep(5)
-            
-            # 가맹점 정보 수집 
-            try:
-                select_element = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/div[4]/div[1]/div[1]/div/div/select')))
-                options = select_element.find_elements(By.TAG_NAME, 'option')
-                for idx, option in enumerate(options):
-                    self.data_frame.at[row_idx, f'가게명_{idx+1}'] = option.text
-            except Exception as e:
-                self.data_frame.at[row_idx, '가게명'] = f"에러 발생: {e}"
-            time.sleep(5)
-            
-            driver.delete_all_cookies()
-        except Exception as e:
-            print(f"배달의민족 에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"배달의민족 에러 발생: {e}"
 
-    # 쿠팡이츠 크롤링 작업 
-    def crawl_coupang(self, driver, user_id, user_pw, row_idx):
+            # 설정값에 따라 수집
+            if settings.get("연락처"):
+                step = "연락처 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    contact_element = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/form/div/div/div[2]/div'))
+                    )
+                    self.set_row_result(row_idx, 연락처=contact_element.text)
+                except Exception as sub_e:
+                    self.set_row_result(row_idx, 연락처=f"수집 실패: {sub_e}")
+
+            if settings.get("사업자번호"):
+                step = "사업자번호 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    business_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[1]/div[6]/div[5]/div')
+                    self.set_row_result(row_idx, 사업자번호=business_element.text)
+                except Exception as sub_e:
+                    self.set_row_result(row_idx, 사업자번호=f"수집 실패: {sub_e}")
+
+            if settings.get("주소"):
+                step = "주소 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    address_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[1]/div[6]/div[12]/dl/dd[2]')
+                    self.set_row_result(row_idx, 주소=address_element.text)
+                except Exception as sub_e:
+                    self.set_row_result(row_idx, 주소=f"수집 실패: {sub_e}")
+
+            if settings.get("가게명"):
+                step = "가게명 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    driver.get("https://self.baemin.com/")
+                    time.sleep(3)
+                    select_element = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/div[4]/div[1]/div[1]/div/div/select'))
+                    )
+                    options = select_element.find_elements(By.TAG_NAME, "option")
+                    for idx, option in enumerate(options[:3]):
+                        self.set_row_result(row_idx, **{f"가게명_{idx+1}": option.text})
+                except Exception as sub_e:
+                    self.set_row_result(row_idx, 가게명_1=f"수집 실패: {sub_e}")
+
+            self.set_row_result(row_idx, status="성공", step="완료", error="")
+            self.write_log(f"[행 {row_idx + 1}] 배달의민족 성공")
+
+        except Exception as e:
+            friendly_error = self.get_user_friendly_error(step, e)
+            self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            self.write_log(f"[행 {row_idx + 1}] 배달의민족 실패 - {friendly_error}")
+
+    #요기요 처리 함수
+    def process_yogiyo(self, driver, row, row_idx):
+        step = "초기화"
         try:
+            self.write_log(f"[행 {row_idx + 1}] 요기요 시작")
+            self.set_row_result(row_idx, status="실패", step="미구현", error="요기요는 아직 구현되지 않았습니다.")
+            self.write_log(f"[행 {row_idx + 1}] 요기요 미구현")
+        except Exception as e:
+            friendly_error = self.get_user_friendly_error(step, e)
+            self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            self.write_log(f"[행 {row_idx + 1}] 요기요 실패 - {friendly_error}")
+
+    #쿠팡이츠 처리 함수
+    def process_coupang(self, driver, row, row_idx):
+        step = "초기화"
+        try:
+            settings = self.crawl_settings["쿠팡이츠"]
+            user_id = str(row.get("ID", "")).strip()
+            user_pw = str(row.get("PW", "")).strip()
+
+            self.write_log(f"[행 {row_idx + 1}] 쿠팡이츠 시작")
+
+            step = "쿠팡이츠 로그인 페이지 접속"
+            self.set_row_result(row_idx, step=step)
             driver.get("https://store.coupangeats.com/merchant/management/stores/")
-            time.sleep(5)
-            
-            #ID 입력
-            id_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[1]/input')))
+
+            step = "아이디 입력"
+            id_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@type="text"]'))
+            )
             id_input.clear()
             id_input.send_keys(user_id)
-            time.sleep(5)
-            
-            #PW 입력
-            pw_input = driver.find_element(By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[2]/input')
+
+            step = "비밀번호 입력"
+            pw_input = driver.find_element(By.XPATH, '//input[@type="password"]')
             pw_input.clear()
             pw_input.send_keys(user_pw)
-            time.sleep(5)
 
-            #로그인 버튼 클릭 
-            login_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/button')))
+            step = "로그인 버튼 클릭"
+            login_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//form//button'))
+            )
             login_button.click()
-            time.sleep(5)
+            time.sleep(3)
 
-            #로그인 실패 시 C열에 로그인 실패 기록 후 종료 
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 혹은 비밀번호가 일치하지 않습니다.")]')
             if login_error:
-                self.data_frame.at[row_idx, '연락처'] = "로그인 실패"
-                driver.quit()
+                self.set_row_result(row_idx, status="실패", step="로그인 확인", error="로그인 실패")
                 return
-            time.sleep(5)
-            
-            #사이트 이동 ( 가맹점 화면으로 이동 )
+
             driver.get("https://store.coupangeats.com/merchant/management/stores/")
-            time.sleep(5)
+            time.sleep(3)
 
-            # 클릭할 위치에 마우스 이동 후 클릭
-            action = ActionChains(driver)
-            action.move_by_offset(10, 10).click().perform()
-            time.sleep(5)
+            if settings.get("가게명") or settings.get("가게번호"):
+                step = "가게 정보 수집"
+                self.set_row_result(row_idx, step=step)
 
-            #다음에 하기 버튼 클릭 
-            close_buttons = driver.find_elements(By.XPATH, '//button[text()="다음에 하기"]')
-            for button in close_buttons:
-                if button.is_displayed():
-                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(button)).click()
-                    time.sleep(5)
+                store_elements = WebDriverWait(driver, 10).until(
+                    EC.presence_of_all_elements_located((By.CLASS_NAME, 'store-link'))
+                )
 
-            # 가게 정보 수집 
-            try:
-                # 가게 정보 요소 찾기
-                store_elements = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CLASS_NAME, 'store-link')))
-                
-                for idx, store_element in enumerate(store_elements):
-                    # Debugging: 요소의 HTML 내용을 출력
-                    print(f"Store element HTML content: {store_element.get_attribute('innerHTML')}")
+                for idx, store_element in enumerate(store_elements[:3]):
+                    if settings.get("가게명"):
+                        self.set_row_result(row_idx, **{f"가게명_{idx+1}": store_element.text.strip()})
 
-                    # 가게명 저장
-                    store_name = store_element.text
-                    self.data_frame.at[row_idx, f'가게명_{idx+1}'] = store_name
-                    
-                    # 가게번호 저장 (바로 다음 첫 번째 <span> 요소)
-                    try:
-                        # store_element의 부모 요소에서 첫 번째 <span>을 찾기
-                        parent_element = store_element.find_element(By.XPATH, "..")  # ".."으로 상위 요소 접근
-                        first_span_element = parent_element.find_element(By.XPATH, './span[1]')
-                        
-                        if first_span_element: # 첫 번째 <span> 요소가 존재한다면
-                            store_number = first_span_element.text
-                            self.data_frame.at[row_idx, f'가게번호_{idx+1}'] = store_number
-                        else:
-                            self.data_frame.at[row_idx, f'가게번호_{idx+1}'] = 'No span found'
-                    except Exception as e:
-                        self.data_frame.at[row_idx, f'가게번호_{idx+1}'] = f"에러 발생: {e}"
-            except Exception as e:
-                self.data_frame.at[row_idx, '가게명'] = f"에러 발생: {e}"
-            time.sleep(5)
+                    if settings.get("가게번호"):
+                        try:
+                            parent_element = store_element.find_element(By.XPATH, "..")
+                            span_element = parent_element.find_element(By.XPATH, './span[1]')
+                            self.set_row_result(row_idx, **{f"가게번호_{idx+1}": span_element.text.strip()})
+                        except Exception as sub_e:
+                            self.set_row_result(row_idx, **{f"가게번호_{idx+1}": f"수집 실패: {sub_e}"})
+
+            self.set_row_result(row_idx, status="성공", step="완료", error="")
+            self.write_log(f"[행 {row_idx + 1}] 쿠팡이츠 성공")
 
         except Exception as e:
-            print(f"쿠팡이츠 에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"쿠팡이츠 에러 발생: {e}"
+            friendly_error = self.get_user_friendly_error(step, e)
+            self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            self.write_log(f"[행 {row_idx + 1}] 쿠팡이츠 실패 - {friendly_error}")
 
-    def crawl_ddangyo(self, driver, user_id, user_pw, row_idx):
+    #땡겨요 처리 함수 
+    def process_ddangyo(self, driver, row, row_idx):
+        step = "초기화"
         try:
-            driver.get("https://example.com/ddangyo")
-            time.sleep(5)
-            # Implement the specific crawling steps for ddangyo here
+            self.write_log(f"[행 {row_idx + 1}] 땡겨요 시작")
+            self.set_row_result(row_idx, status="실패", step="미구현", error="땡겨요는 아직 구현되지 않았습니다.")
+            self.write_log(f"[행 {row_idx + 1}] 땡겨요 미구현")
         except Exception as e:
-            print(f"땡겨요 에러 발생: {e}")
-            self.data_frame.at[row_idx, '에러'] = f"땡겨요 에러 발생: {e}"
+            friendly_error = self.get_user_friendly_error(step, e)
+            self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            self.write_log(f"[행 {row_idx + 1}] 땡겨요 실패 - {friendly_error}")
 
-# Initialize UI
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     root = tk.Tk()
-    root.title("크롤링 프로그램")
-    root.geometry("1000x600")
-    frame = Crawling(root)
-    frame.pack(fill="both", expand=True)
+    root.title("Information Crawling")
+    root.geometry("1300x850")
+    app = MultiCrawlerApp(root)
+    app.pack(fill="both", expand=True)
     root.mainloop()
