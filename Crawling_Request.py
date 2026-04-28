@@ -1,4 +1,6 @@
 import re
+import os
+import winreg
 import time
 import json
 import threading
@@ -13,6 +15,7 @@ import requests
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -438,7 +441,10 @@ class MultiCrawlerApp(tk.Frame):
             self.set_row_result(row_idx, status="실패", step="구분 확인", error="구분값이 비어 있습니다.")
             return
 
-        driver = self.create_driver()
+        if service_type == "쿠팡이츠":
+            driver = self.create_coupang_driver()
+        else:
+            driver = self.create_driver()
 
         try:
             if service_type == "배달의민족":
@@ -458,7 +464,7 @@ class MultiCrawlerApp(tk.Frame):
                 pass
 
     # --------------------------
-    # 공통
+    # 공통 Chromedriver  
     # --------------------------
     def create_driver(self):
         options = webdriver.ChromeOptions()
@@ -474,6 +480,66 @@ class MultiCrawlerApp(tk.Frame):
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()),options=options)
         driver.set_window_size(1400, 900)
         return driver
+
+    # --------------------------
+    # 쿠팡이츠용 Undetected Chromedriver  
+    # --------------------------  
+    def create_coupang_driver(self):
+        chrome_major_version = self.get_chrome_major_version()
+
+        options = uc.ChromeOptions()
+        options.add_argument("--start-maximized")
+
+        driver = uc.Chrome(
+            options=options,
+            use_subprocess=True,
+            version_main=chrome_major_version
+        )
+        driver.set_window_size(1400, 900)
+
+        try:
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        });
+                    """
+                }
+            )
+        except Exception:
+            pass
+
+        return driver
+
+    # --------------------------
+    # Chromedriver 버전 감지   
+    # --------------------------      
+    def get_chrome_major_version(self):
+        """
+        Windows 레지스트리에서 Chrome 버전을 읽고
+        메이저 버전(int)을 반환
+        예: 147.0.7727.102 -> 147
+        """
+        reg_paths = [
+            (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon", "version"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Google\Chrome\BLBeacon", "version"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Google\Chrome\BLBeacon", "version"),
+        ]
+
+        for root, path, name in reg_paths:
+            try:
+                with winreg.OpenKey(root, path) as key:
+                    version, _ = winreg.QueryValueEx(key, name)
+                    if version:
+                        major = int(str(version).split(".")[0])
+                        self.write_log(f"감지된 Chrome 버전: {version} (major={major})")
+                        return major
+            except Exception:
+                continue
+
+        raise Exception("설치된 Chrome 버전을 찾을 수 없습니다.")
 
     def get_user_friendly_error(self, step, exception):
         if isinstance(exception, TimeoutException):
@@ -601,18 +667,19 @@ class MultiCrawlerApp(tk.Frame):
             )
             id_input.clear()
             id_input.send_keys(user_id)
+            time.sleep(3)
 
             step = "비밀번호 입력"
             pw_input = driver.find_element(By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[2]/input')
             pw_input.clear()
             pw_input.send_keys(user_pw)
+            time.sleep(3)
 
             step = "로그인 버튼 클릭"
             login_button = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/button'))
             )
             login_button.click()
-
             time.sleep(3)
 
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 혹은 비밀번호가 일치하지 않습니다.")]')
