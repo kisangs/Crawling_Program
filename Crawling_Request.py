@@ -1,8 +1,11 @@
+import re
 import time
 import json
 import threading
 import logging
 import traceback
+import webbrowser
+from tkinter import messagebox
 from io import BytesIO
 
 import pandas as pd
@@ -45,7 +48,7 @@ class MultiCrawlerApp(tk.Frame):
         "쿠팡이츠": "쿠팡이츠_결과",
         "땡겨요": "땡겨요_결과"
         }
-        self.apps_script_url = "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+        self.apps_script_url = "https://script.google.com/macros/s/AKfycbzO3Nnt3Spnhj_JCcsfkPGrWpjazDR5vOrJC31CZpcSiMfNi9FwqMpphDpUT_lfe9xnqg/exec"
 
         # 서비스별 크롤링 설정
         self.crawl_settings = {
@@ -119,6 +122,9 @@ class MultiCrawlerApp(tk.Frame):
         self.start_button.pack(side="left", padx=5)
 
         self.retry_button = ttk.Button(top_frame, text="결과 재전송", command=self.retry_upload_results)
+        self.retry_button.pack(side="left", padx=5)
+
+        self.retry_button = ttk.Button(top_frame, text="시트 확인", command=self.open_googlesheet)
         self.retry_button.pack(side="left", padx=5)
 
         self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100,
@@ -268,17 +274,20 @@ class MultiCrawlerApp(tk.Frame):
 
             self.current_status_var.set("불러오기 완료")
             self.write_log(f"{self.source_sheet_name} 시트 로드 완료 - {len(self.data_frame)}건")
-            messagebox.showinfo("완료", "구글 시트 데이터를 불러왔습니다.")
 
         except Exception as e:
             self.write_log(f"구글 시트 로드 실패: {e}")
-            messagebox.showerror("오류", f"구글 시트 데이터 불러오기 실패:\n{e}")
 
     def ensure_columns(self):
         if self.data_frame is None:
             return
 
-        required_columns = ["구분", "ID", "PW",]
+        required_columns = [
+        "구분", "ID", "PW",
+        "상태", "작업단계", "에러", "처리시간", "처리일시",
+        "주문접수채널", "연락처", "사업자번호", "주소",
+        "지번주소", "상세주소", "우편번호"
+    ]
 
         for col in required_columns:
             if col not in self.data_frame.columns:
@@ -462,10 +471,7 @@ class MultiCrawlerApp(tk.Frame):
         options.add_argument("--disable-gpu")
         options.add_argument("--log-level=3")
 
-        driver = webdriver.Chrome(
-            service=ChromeService(ChromeDriverManager().install()),
-            options=options
-        )
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()),options=options)
         driver.set_window_size(1400, 900)
         return driver
 
@@ -502,7 +508,7 @@ class MultiCrawlerApp(tk.Frame):
     # 서비스별 처리
     # --------------------------
 
-    #배달의 민족 처리 함수
+    #배달의민족 처리 함수 
     def process_baemin(self, driver, row, row_idx):
         step = "초기화"
         try:
@@ -512,81 +518,48 @@ class MultiCrawlerApp(tk.Frame):
 
             self.write_log(f"[행 {row_idx + 1}] 배달의민족 시작")
 
-            step = "배민 로그인 페이지 접속"
-            self.set_row_result(row_idx, step=step)
-            driver.get("https://self.baemin.com/mypage/owner")
+            # 1. 로그인
+            step = "배민 로그인"
+            self.baemin_login(driver, user_id, user_pw, row_idx)
 
-            step = "아이디 입력"
-            self.set_row_result(row_idx, step=step)
-            id_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//input[@type="text"]'))
-            )
-            id_input.clear()
-            id_input.send_keys(user_id)
+            # 2. owner 페이지 수집
+            if any([
+                settings.get("연락처"),
+                settings.get("사업자번호"),
+                settings.get("주소")
+            ]):
+                step = "owner 페이지 수집"
+                self.collect_baemin_owner_page(driver, row_idx, settings)
 
-            step = "비밀번호 입력"
-            self.set_row_result(row_idx, step=step)
-            pw_input = driver.find_element(By.XPATH, '//input[@type="password"]')
-            pw_input.clear()
-            pw_input.send_keys(user_pw)
+            # 3. shops 페이지 수집
+            if any([
+                settings.get("가맹점명"),
+                settings.get("샵넘버"),
+                settings.get("광고서비스사용유무")
+            ]):
+                step = "shops 페이지 이동"
+                self.go_to_baemin_page(
+                    driver,
+                    "https://self.baemin.com/shops",
+                    row_idx,
+                    step
+                )
 
-            step = "로그인 버튼 클릭"
-            self.set_row_result(row_idx, step=step)
-            login_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//form//button'))
-            )
-            login_button.click()
-            time.sleep(3)
+                step = "shops 페이지 수집"
+                self.collect_baemin_shops_page(driver, row_idx, settings)
 
-            login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 또는 비밀번호가 일치하지 않습니다.")]')
-            if login_error:
-                self.set_row_result(row_idx, status="실패", step="로그인 확인", error="로그인 실패")
-                return
+            # 4. baro-pay 페이지 수집
+            if settings.get("주문접수채널"):
+                step = "baro-pay 페이지 이동"
+                self.go_to_baemin_page(
+                    driver,
+                    "https://self.baemin.com/mypage/baro-pay",
+                    row_idx,
+                    step
+                )
 
-            # 설정값에 따라 수집
-            if settings.get("연락처"):
-                step = "연락처 수집"
-                self.set_row_result(row_idx, step=step)
-                try:
-                    contact_element = WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/form/div/div/div[2]/div'))
-                    )
-                    self.set_row_result(row_idx, 연락처=contact_element.text)
-                except Exception as sub_e:
-                    self.set_row_result(row_idx, 연락처=f"수집 실패: {sub_e}")
-
-            if settings.get("사업자번호"):
-                step = "사업자번호 수집"
-                self.set_row_result(row_idx, step=step)
-                try:
-                    business_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[1]/div[6]/div[5]/div')
-                    self.set_row_result(row_idx, 사업자번호=business_element.text)
-                except Exception as sub_e:
-                    self.set_row_result(row_idx, 사업자번호=f"수집 실패: {sub_e}")
-
-            if settings.get("주소"):
-                step = "주소 수집"
-                self.set_row_result(row_idx, step=step)
-                try:
-                    address_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[3]/div[1]/div[6]/div[12]/dl/dd[2]')
-                    self.set_row_result(row_idx, 주소=address_element.text)
-                except Exception as sub_e:
-                    self.set_row_result(row_idx, 주소=f"수집 실패: {sub_e}")
-
-            if settings.get("가게명"):
-                step = "가게명 수집"
-                self.set_row_result(row_idx, step=step)
-                try:
-                    driver.get("https://self.baemin.com/")
-                    time.sleep(3)
-                    select_element = WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/div[4]/div[1]/div[1]/div/div/select'))
-                    )
-                    options = select_element.find_elements(By.TAG_NAME, "option")
-                    for idx, option in enumerate(options[:3]):
-                        self.set_row_result(row_idx, **{f"가게명_{idx+1}": option.text})
-                except Exception as sub_e:
-                    self.set_row_result(row_idx, 가게명_1=f"수집 실패: {sub_e}")
+                step = "baro-pay 페이지 수집"
+                self.collect_baemin_baro_pay_page(driver, row_idx, settings)
 
             self.set_row_result(row_idx, status="성공", step="완료", error="")
             self.write_log(f"[행 {row_idx + 1}] 배달의민족 성공")
@@ -620,25 +593,26 @@ class MultiCrawlerApp(tk.Frame):
 
             step = "쿠팡이츠 로그인 페이지 접속"
             self.set_row_result(row_idx, step=step)
-            driver.get("https://store.coupangeats.com/merchant/management/stores/")
+            driver.get("https://store.coupangeats.com/merchant/login")
 
             step = "아이디 입력"
             id_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//input[@type="text"]'))
+                EC.presence_of_element_located((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[1]/input'))
             )
             id_input.clear()
             id_input.send_keys(user_id)
 
             step = "비밀번호 입력"
-            pw_input = driver.find_element(By.XPATH, '//input[@type="password"]')
+            pw_input = driver.find_element(By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[2]/input')
             pw_input.clear()
             pw_input.send_keys(user_pw)
 
             step = "로그인 버튼 클릭"
             login_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//form//button'))
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/button'))
             )
             login_button.click()
+
             time.sleep(3)
 
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 혹은 비밀번호가 일치하지 않습니다.")]')
@@ -646,28 +620,26 @@ class MultiCrawlerApp(tk.Frame):
                 self.set_row_result(row_idx, status="실패", step="로그인 확인", error="로그인 실패")
                 return
 
+            step = "가게 목록 페이지 이동"
+            self.set_row_result(row_idx, step=step)
             driver.get("https://store.coupangeats.com/merchant/management/stores/")
             time.sleep(3)
 
-            if settings.get("가게명") or settings.get("가게번호"):
+            if settings.get("가맹점명") or settings.get("샵넘버") or settings.get("상태"):
                 step = "가게 정보 수집"
                 self.set_row_result(row_idx, step=step)
 
-                store_elements = WebDriverWait(driver, 10).until(
-                    EC.presence_of_all_elements_located((By.CLASS_NAME, 'store-link'))
-                )
+                store_list = self.extract_coupang_store_list(driver)
 
-                for idx, store_element in enumerate(store_elements[:3]):
-                    if settings.get("가게명"):
-                        self.set_row_result(row_idx, **{f"가게명_{idx+1}": store_element.text.strip()})
+                for idx, store in enumerate(store_list, start=1):
+                    if settings.get("가맹점명"):
+                        self.set_row_result(row_idx, **{f"가맹점명_{idx}": store.get("가맹점명", "")})
 
-                    if settings.get("가게번호"):
-                        try:
-                            parent_element = store_element.find_element(By.XPATH, "..")
-                            span_element = parent_element.find_element(By.XPATH, './span[1]')
-                            self.set_row_result(row_idx, **{f"가게번호_{idx+1}": span_element.text.strip()})
-                        except Exception as sub_e:
-                            self.set_row_result(row_idx, **{f"가게번호_{idx+1}": f"수집 실패: {sub_e}"})
+                    if settings.get("샵넘버"):
+                        self.set_row_result(row_idx, **{f"샵넘버_{idx}": store.get("샵넘버", "")})
+
+                    if settings.get("상태"):
+                        self.set_row_result(row_idx, **{f"상태_{idx}": store.get("상태", "")})
 
             self.set_row_result(row_idx, status="성공", step="완료", error="")
             self.write_log(f"[행 {row_idx + 1}] 쿠팡이츠 성공")
@@ -688,6 +660,445 @@ class MultiCrawlerApp(tk.Frame):
             friendly_error = self.get_user_friendly_error(step, e)
             self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
             self.write_log(f"[행 {row_idx + 1}] 땡겨요 실패 - {friendly_error}")
+
+
+    # --------------------------
+    # 구글 스프레드시트 오픈 관련 함수 
+    # --------------------------
+
+    def open_googlesheet(self):
+        try:
+            sheet_url = "https://docs.google.com/spreadsheets/d/1iCMikJwc3FqxNtly8zkh6GFdX4luvs155TH2mbsVxd0/edit?gid=0#gid=0"
+            webbrowser.open(sheet_url)
+            self.write_log("구글 스프레드시트를 브라우저에서 열었습니다.")
+        except Exception as e:
+            self.write_log(f"구글 스프레드시트 열기 실패: {e}")
+            messagebox.showerror("오류", f"구글 스프레드시트를 여는 중 오류가 발생했습니다.\n{e}")
+
+
+
+    # --------------------------
+    # 배달의 민족 관련 함수 모음 
+    # --------------------------
+
+    #배달의민족 로그인 함수 
+    def baemin_login(self, driver, user_id, user_pw, row_idx):
+        step = "배민 로그인 페이지 접속"
+        try:
+            self.set_row_result(row_idx, step=step)
+            driver.get("https://self.baemin.com/mypage/owner")
+
+            step = "로그인 페이지 안정화"
+            self.set_row_result(row_idx, step=step)
+            self.stabilize_baemin_page(driver, wait_time=2)
+
+            step = "아이디 입력"
+            self.set_row_result(row_idx, step=step)
+            id_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@type="text"]'))
+            )
+            id_input.clear()
+            id_input.send_keys(user_id)
+
+            step = "비밀번호 입력"
+            self.set_row_result(row_idx, step=step)
+            pw_input = driver.find_element(By.XPATH, '//input[@type="password"]')
+            pw_input.clear()
+            pw_input.send_keys(user_pw)
+
+            step = "로그인 버튼 클릭"
+            self.set_row_result(row_idx, step=step)
+            login_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//form//button'))
+            )
+            login_button.click()
+
+            step = "로그인 후 팝업 정리"
+            self.set_row_result(row_idx, step=step)
+            self.stabilize_baemin_page(driver, wait_time=3)
+
+            step = "로그인 결과 확인"
+            self.set_row_result(row_idx, step=step)
+            login_error = driver.find_elements(
+                By.XPATH,
+                '//*[contains(text(), "아이디 또는 비밀번호가 일치하지 않습니다.")]'
+            )
+            if login_error:
+                raise Exception("로그인 실패")
+
+            # 로그인 성공 후 한 번 더 팝업 정리
+            self.close_baemin_popups(driver)
+
+        except Exception as e:
+            friendly_error = self.get_user_friendly_error(step, e)
+            self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            raise
+
+    #배달의민족 팝업 닫기 함수 
+    def close_baemin_popups(self, driver):
+        try:
+            close_buttons = driver.find_elements(By.XPATH, '//button[@aria-label="닫기"]')
+            for button in close_buttons:
+                if button.is_displayed():
+                    try:
+                        WebDriverWait(driver, 3).until(lambda d: button.is_displayed() and button.is_enabled())
+                        button.click()
+                    except Exception:
+                        try:
+                            driver.execute_script("arguments[0].click();", button)
+                        except Exception:
+                            pass
+                    time.sleep(0.3)
+        except Exception:
+            pass
+
+    #배달의민족 Owner Page 수집 
+    def collect_baemin_owner_page(self, driver, row_idx, settings):
+        step = "owner 페이지 분석"
+        try:
+            current_url = driver.current_url
+            if "/mypage/owner" not in current_url:
+                step = "owner 페이지 이동"
+                self.go_to_baemin_page(
+                    driver,
+                    "https://self.baemin.com/mypage/owner",
+                    row_idx,
+                    step
+                )
+
+            step = "owner 페이지 팝업 정리"
+            self.set_row_result(row_idx, step=step)
+            self.close_baemin_popups(driver)
+
+            step = "owner 상세영역 분석"
+            self.set_row_result(row_idx, step=step)
+            form_group_map = self.extract_form_group_map(driver)
+
+            # 연락처
+            if settings.get("연락처"):
+                step = "연락처 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    self.close_baemin_popups(driver)
+                    group = form_group_map.get("휴대폰")
+                    if group:
+                        value = group.find_element(By.CSS_SELECTOR, ".inline-values.flex-1").text.strip()
+                        self.set_row_result(row_idx, 연락처=value)
+                    else:
+                        self.set_row_result(row_idx, 연락처="수집 실패: 항목 없음")
+                except Exception as sub_e:
+                    self.close_baemin_popups(driver)
+                    self.set_row_result(row_idx, 연락처=f"수집 실패: {sub_e}")
+
+            # 사업자번호
+            if settings.get("사업자번호"):
+                step = "사업자번호 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    self.close_baemin_popups(driver)
+                    group = form_group_map.get("사업자등록번호")
+                    if group:
+                        value = group.find_element(By.CSS_SELECTOR, ".inline-values.flex-1").text.strip()
+                        self.set_row_result(row_idx, 사업자번호=value)
+                    else:
+                        self.set_row_result(row_idx, 사업자번호="수집 실패: 항목 없음")
+                except Exception as sub_e:
+                    self.close_baemin_popups(driver)
+                    self.set_row_result(row_idx, 사업자번호=f"수집 실패: {sub_e}")
+
+            # 주소
+            if settings.get("주소"):
+                step = "주소 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    self.close_baemin_popups(driver)
+                    group = form_group_map.get("소재지")
+                    if group:
+                        dl_element = group.find_element(By.CSS_SELECTOR, "dl.DataList.mt-2.self-ds")
+                        address_map = self.parse_dl_data(dl_element)
+
+                        base_address = address_map.get("기본주소", "")
+                        jibun_address = address_map.get("지번주소", "")
+                        detail_address = address_map.get("상세주소", "")
+                        zipcode = address_map.get("우편번호", "")
+
+                        self.set_row_result(
+                            row_idx,
+                            주소=base_address,
+                            지번주소=jibun_address,
+                            상세주소=detail_address,
+                            우편번호=zipcode
+                        )
+                    else:
+                        self.set_row_result(row_idx, 주소="수집 실패: 항목 없음")
+                except Exception as sub_e:
+                    self.close_baemin_popups(driver)
+                    self.set_row_result(row_idx, 주소=f"수집 실패: {sub_e}")
+
+        except Exception:
+            raise
+    
+    #배달의민족 Shop 페이지 수집 
+    def collect_baemin_shops_page(self, driver, row_idx, settings):
+        step = "shops 페이지 분석"
+        try:
+            self.set_row_result(row_idx, step=step)
+
+            self.close_baemin_popups(driver)
+
+            step = "가게 목록 수집"
+            self.set_row_result(row_idx, step=step)
+            store_list = self.extract_baemin_store_list(driver)
+
+            if not store_list:
+                self.write_log(f"[행 {row_idx + 1}] shops 페이지에서 가게 목록을 찾지 못했습니다.")
+                return
+
+            for idx, store in enumerate(store_list, start=1):
+                self.close_baemin_popups(driver)
+
+                if settings.get("가맹점명"):
+                    self.set_row_result(row_idx, **{f"가맹점명_{idx}": store.get("가맹점명", "")})
+
+                if settings.get("샵넘버"):
+                    self.set_row_result(row_idx, **{f"샵넘버_{idx}": store.get("샵넘버", "")})
+
+                if settings.get("광고서비스사용유무"):
+                    self.set_row_result(row_idx, **{f"광고서비스사용유무_{idx}": store.get("광고서비스사용유무", "")})
+
+        except Exception:
+            raise
+
+    #배달의민족 baro-pay 페이지 수집 
+    def collect_baemin_baro_pay_page(self, driver, row_idx, settings):
+        step = "baro-pay 페이지 분석"
+        try:
+            current_url = driver.current_url
+            if "/mypage/baro-pay" not in current_url:
+                step = "baro-pay 페이지 이동"
+                self.go_to_baemin_page(
+                    driver,
+                    "https://self.baemin.com/mypage/baro-pay",
+                    row_idx,
+                    step
+                )
+
+            step = "baro-pay 페이지 팝업 정리"
+            self.set_row_result(row_idx, step=step)
+            self.close_baemin_popups(driver)
+
+            step = "baro-pay 상세영역 분석"
+            self.set_row_result(row_idx, step=step)
+            form_group_map = self.extract_form_group_map(driver)
+
+            if settings.get("주문접수채널"):
+                step = "주문접수채널 수집"
+                self.set_row_result(row_idx, step=step)
+                try:
+                    self.close_baemin_popups(driver)
+                    group = form_group_map.get("주문 접수채널")
+                    if group:
+                        value = group.find_element(By.CSS_SELECTOR, ".inline-values.flex-1.flex-1").text.strip()
+                        self.set_row_result(row_idx, 주문접수채널=value)
+                    else:
+                        self.set_row_result(row_idx, 주문접수채널="수집 실패: 항목 없음")
+                except Exception as sub_e:
+                    self.close_baemin_popups(driver)
+                    self.set_row_result(row_idx, 주문접수채널=f"수집 실패: {sub_e}")
+
+        except Exception:
+            raise
+
+    #배달의민족 팝업 닫기 
+    def close_baemin_popups(self, driver):
+        try:
+            close_buttons = driver.find_elements(By.XPATH, '//button[@aria-label="닫기"]')
+            for button in close_buttons:
+                try:
+                    if button.is_displayed():
+                        try:
+                            WebDriverWait(driver, 3).until(
+                                lambda d: button.is_displayed() and button.is_enabled()
+                            )
+                            button.click()
+                        except Exception:
+                            try:
+                                driver.execute_script("arguments[0].click();", button)
+                            except Exception:
+                                pass
+                        time.sleep(0.3)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    # 배달의민족 페이지 안정화 및 진입 후 팝업 반복 정리
+    def stabilize_baemin_page(self, driver, wait_time=1.5):
+        time.sleep(wait_time)
+        self.close_baemin_popups(driver)
+        time.sleep(0.5)
+        self.close_baemin_popups(driver)
+        time.sleep(0.3)
+
+    #배달의민족 페이지 이동 공통함수 
+    def go_to_baemin_page(self, driver, url, row_idx, step):
+        self.set_row_result(row_idx, step=step)
+        driver.get(url)
+        self.stabilize_baemin_page(driver, wait_time=2)
+
+    #배달의민족 form-group 관련 함수 
+    def extract_form_group_map(self, driver):
+        result = {}
+        groups = driver.find_elements(By.CLASS_NAME, "form-group")
+
+        for group in groups:
+            try:
+                label = group.find_element(By.CLASS_NAME, "form-label").text.strip()
+                result[label] = group
+            except:
+                continue
+
+        return result
+
+    #배달의민족 주소 파싱 함수 
+    def parse_dl_data(self, dl_element):
+        data = {}
+        children = dl_element.find_elements(By.XPATH, "./dt | ./dd")
+
+        current_key = None
+        for child in children:
+            tag_name = child.tag_name.lower().strip()
+            text = child.text.strip()
+
+            if tag_name == "dt":
+                current_key = text
+            elif tag_name == "dd" and current_key:
+                data[current_key] = text
+                current_key = None
+
+        return data
+
+    #배달의민족 가맹점명 / 샵넘버 / 광고서비스 조합 함수 
+    def extract_baemin_store_list(self, driver):
+        self.close_baemin_popups(driver)
+
+        store_list = []
+
+        # 각 가게 카드 단위로 수집
+        shop_cards = driver.find_elements(By.CSS_SELECTOR, "div.ShopCard-module__BgLt")
+
+        for card in shop_cards:
+            merchant_name = ""
+            shop_number = ""
+            ad_service = ""
+
+            # 가맹점명
+            try:
+                merchant_elem = card.find_element(
+                    By.CSS_SELECTOR,
+                    "p.c_qx9u_13c33de7.Typography_b_r4ax_1bisyd49.Typography_b_r4ax_1bisyd4r.Typography_b_r4ax_1bisyd44j.Typography_b_r4ax_1bisyd44m"
+                )
+                merchant_name = (merchant_elem.text or merchant_elem.get_attribute("textContent") or "").strip()
+            except Exception:
+                merchant_name = ""
+
+            # 샵넘버
+            try:
+                shop_number_elem = card.find_element(
+                    By.CSS_SELECTOR,
+                    "span.c_qx9u_13c33de7.Typography_b_r4ax_1bisyd49.Typography_b_r4ax_1bisyd4q.Typography_b_r4ax_1bisyd44j"
+                )
+                raw_shop_number = (shop_number_elem.text or shop_number_elem.get_attribute("textContent") or "").strip()
+
+                # 숫자만 추출하고 싶다면 아래 사용
+                match = re.search(r'(\d{5,})', raw_shop_number)
+                if match:
+                    shop_number = match.group(1)
+                else:
+                    shop_number = raw_shop_number
+            except Exception:
+                shop_number = ""
+
+            # 광고서비스 사용 유무
+            try:
+                ad_link = card.find_element(By.CSS_SELECTOR, "a.ShopCard-module__jp89")
+                ad_value_elem = ad_link.find_element(
+                    By.CSS_SELECTOR,
+                    "span.c_qx9u_13c33de7.Typography_b_r4ax_1bisyd49.Typography_b_r4ax_1bisyd4q.Typography_b_r4ax_1bisyd44j.TextListItem_b_r4ax_n197m76 "
+                    "div.Flex_c_qx9u_bbdidai.Flex_c_qx9u_bbdidak.Flex_c_qx9u_bbdida2.TextListItem_b_r4ax_n197m7a"
+                )
+                ad_service = (ad_value_elem.text or ad_value_elem.get_attribute("textContent") or "").strip()
+            except Exception:
+                ad_service = ""
+
+            store_list.append({
+                "가맹점명": merchant_name,
+                "샵넘버": shop_number,
+                "광고서비스사용유무": ad_service
+            })
+
+        return store_list
+    
+
+    # --------------------------
+    # 쿠팡이츠 관련 함수 모음 
+    # --------------------------
+
+    def extract_coupang_store_list(self, driver):
+        store_list = []
+
+        # ul.store-list 대기
+        store_ul = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "ul.store-list"))
+        )
+
+        li_elements = store_ul.find_elements(By.XPATH, "./li")
+
+        for li in li_elements:
+            try:
+                # 헤더 행은 a.store-link가 없으므로 제외
+                store_link_elements = li.find_elements(By.CSS_SELECTOR, "a.store-link")
+                if not store_link_elements:
+                    continue
+
+                store_name = ""
+                shop_number = ""
+                store_status = ""
+
+                # 가맹점명
+                try:
+                    store_name = store_link_elements[0].text.strip()
+                except Exception:
+                    store_name = ""
+
+                # span 목록
+                span_elements = li.find_elements(By.XPATH, "./span")
+
+                # 첫 번째 span = 샵넘버
+                if len(span_elements) >= 1:
+                    try:
+                        shop_number = span_elements[0].text.strip()
+                    except Exception:
+                        shop_number = ""
+
+                # 상태
+                try:
+                    status_elem = li.find_element(By.CSS_SELECTOR, "span.red-font.mw-145")
+                    store_status = status_elem.text.strip()
+                except Exception:
+                    store_status = ""
+
+                store_list.append({
+                    "가맹점명": store_name,
+                    "샵넘버": shop_number,
+                    "상태": store_status
+                })
+
+            except Exception:
+                continue
+
+        return store_list
+
 
 
 if __name__ == "__main__":
