@@ -1,6 +1,4 @@
 import re
-import os
-import winreg
 import time
 import json
 import threading
@@ -15,7 +13,6 @@ import requests
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -31,7 +28,6 @@ from selenium.common.exceptions import (
     StaleElementReferenceException,
     WebDriverException
 )
-
 
 class MultiCrawlerApp(tk.Frame):
     def __init__(self, parent):
@@ -67,7 +63,6 @@ class MultiCrawlerApp(tk.Frame):
             "요기요": {
                 "가맹점명": True,
                 "샵넘버": True,
-                "연락처": True,
                 "사업자번호": True,
                 "제휴포스사용여부": True
             },
@@ -78,7 +73,8 @@ class MultiCrawlerApp(tk.Frame):
             },
             "땡겨요": {
                 "가게명": True,
-                "샵넘버": True
+                "샵넘버": True,
+                "상태": True
             }
         }
 
@@ -441,10 +437,7 @@ class MultiCrawlerApp(tk.Frame):
             self.set_row_result(row_idx, status="실패", step="구분 확인", error="구분값이 비어 있습니다.")
             return
 
-        if service_type == "쿠팡이츠":
-            driver = self.create_coupang_driver()
-        else:
-            driver = self.create_driver()
+        driver = self.create_driver()
 
         try:
             if service_type == "배달의민족":
@@ -464,7 +457,7 @@ class MultiCrawlerApp(tk.Frame):
                 pass
 
     # --------------------------
-    # 공통 Chromedriver  
+    # 공통
     # --------------------------
     def create_driver(self):
         options = webdriver.ChromeOptions()
@@ -480,66 +473,6 @@ class MultiCrawlerApp(tk.Frame):
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()),options=options)
         driver.set_window_size(1400, 900)
         return driver
-
-    # --------------------------
-    # 쿠팡이츠용 Undetected Chromedriver  
-    # --------------------------  
-    def create_coupang_driver(self):
-        chrome_major_version = self.get_chrome_major_version()
-
-        options = uc.ChromeOptions()
-        options.add_argument("--start-maximized")
-
-        driver = uc.Chrome(
-            options=options,
-            use_subprocess=True,
-            version_main=chrome_major_version
-        )
-        driver.set_window_size(1400, 900)
-
-        try:
-            driver.execute_cdp_cmd(
-                "Page.addScriptToEvaluateOnNewDocument",
-                {
-                    "source": """
-                        Object.defineProperty(navigator, 'webdriver', {
-                            get: () => undefined
-                        });
-                    """
-                }
-            )
-        except Exception:
-            pass
-
-        return driver
-
-    # --------------------------
-    # Chromedriver 버전 감지   
-    # --------------------------      
-    def get_chrome_major_version(self):
-        """
-        Windows 레지스트리에서 Chrome 버전을 읽고
-        메이저 버전(int)을 반환
-        예: 147.0.7727.102 -> 147
-        """
-        reg_paths = [
-            (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon", "version"),
-            (winreg.HKEY_LOCAL_MACHINE, r"Software\Google\Chrome\BLBeacon", "version"),
-            (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Google\Chrome\BLBeacon", "version"),
-        ]
-
-        for root, path, name in reg_paths:
-            try:
-                with winreg.OpenKey(root, path) as key:
-                    version, _ = winreg.QueryValueEx(key, name)
-                    if version:
-                        major = int(str(version).split(".")[0])
-                        self.write_log(f"감지된 Chrome 버전: {version} (major={major})")
-                        return major
-            except Exception:
-                continue
-
-        raise Exception("설치된 Chrome 버전을 찾을 수 없습니다.")
 
     def get_user_friendly_error(self, step, exception):
         if isinstance(exception, TimeoutException):
@@ -639,9 +572,42 @@ class MultiCrawlerApp(tk.Frame):
     def process_yogiyo(self, driver, row, row_idx):
         step = "초기화"
         try:
+            settings = self.crawl_settings["요기요"]
+            user_id = str(row.get("ID", "")).strip()
+            user_pw = str(row.get("PW", "")).strip()
+
             self.write_log(f"[행 {row_idx + 1}] 요기요 시작")
-            self.set_row_result(row_idx, status="실패", step="미구현", error="요기요는 아직 구현되지 않았습니다.")
-            self.write_log(f"[행 {row_idx + 1}] 요기요 미구현")
+
+            # 1. 로그인
+            step = "요기요 로그인"
+            self.yogiyo_login(driver, user_id, user_pw, row_idx)
+
+            # 2. 매장 목록 수집
+            step = "스토어 목록 수집"
+            store_list = self.extract_yogiyo_store_list(driver, row_idx)
+
+            if not store_list:
+                raise Exception("스토어 목록을 찾지 못했습니다.")
+
+            # 3. 기본 정보 저장
+            for idx, store in enumerate(store_list, start=1):
+                if settings.get("가맹점명"):
+                    self.set_row_result(row_idx, **{f"가맹점명_{idx}": store.get("가맹점명", "")})
+
+                if settings.get("샵넘버"):
+                    self.set_row_result(row_idx, **{f"샵넘버_{idx}": store.get("샵넘버", "")})
+
+                if settings.get("사업자번호"):
+                    self.set_row_result(row_idx, **{f"사업자번호_{idx}": store.get("사업자번호", "")})
+
+            # 4. 제휴POS 사용 여부 수집
+            if settings.get("제휴포스사용여부"):
+                step = "제휴POS사용여부 수집"
+                self.collect_yogiyo_pos_usage(driver, row_idx, store_list)
+
+            self.set_row_result(row_idx, status="성공", step="완료", error="")
+            self.write_log(f"[행 {row_idx + 1}] 요기요 성공")
+
         except Exception as e:
             friendly_error = self.get_user_friendly_error(step, e)
             self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
@@ -667,19 +633,18 @@ class MultiCrawlerApp(tk.Frame):
             )
             id_input.clear()
             id_input.send_keys(user_id)
-            time.sleep(3)
 
             step = "비밀번호 입력"
             pw_input = driver.find_element(By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/div[2]/input')
             pw_input.clear()
             pw_input.send_keys(user_pw)
-            time.sleep(3)
 
             step = "로그인 버튼 클릭"
             login_button = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, '/html/body/div/div/div[2]/div/div/div/form/button'))
             )
             login_button.click()
+
             time.sleep(3)
 
             login_error = driver.find_elements(By.XPATH, '//*[contains(text(), "아이디 혹은 비밀번호가 일치하지 않습니다.")]')
@@ -720,9 +685,50 @@ class MultiCrawlerApp(tk.Frame):
     def process_ddangyo(self, driver, row, row_idx):
         step = "초기화"
         try:
+            settings = self.crawl_settings["땡겨요"]
+            user_id = str(row.get("ID", "")).strip()
+            user_pw = str(row.get("PW", "")).strip()
+
             self.write_log(f"[행 {row_idx + 1}] 땡겨요 시작")
-            self.set_row_result(row_idx, status="실패", step="미구현", error="땡겨요는 아직 구현되지 않았습니다.")
-            self.write_log(f"[행 {row_idx + 1}] 땡겨요 미구현")
+
+            # 1. 로그인
+            step = "땡겨요 로그인"
+            self.ddangyo_login(driver, user_id, user_pw, row_idx)
+
+            # 2. 가게관리 메뉴 이동
+            step = "가게관리 메뉴 이동"
+            self.go_to_ddangyo_store_manage(driver, row_idx)
+
+            # 3. 가게 목록 추출
+            step = "가게 목록 추출"
+            store_names = self.extract_ddangyo_store_names(driver, row_idx)
+
+            if not store_names:
+                raise Exception("가게 목록을 찾지 못했습니다.")
+
+            self.write_log(f"[행 {row_idx + 1}] 땡겨요 가게 목록 {len(store_names)}건 확인")
+
+            # 4. 가게별 상세 수집
+            for idx, store_name in enumerate(store_names, start=1):
+                step = f"{idx}번째 가게 선택 및 상세 수집"
+                self.set_row_result(row_idx, step=step)
+                self.write_log(f"[행 {row_idx + 1}] 땡겨요 가게 선택 시작 - {store_name}")
+
+                self.select_ddangyo_store_by_name(driver, row_idx, store_name)
+                store_detail = self.extract_ddangyo_store_detail(driver, target_store_name=store_name)
+
+                if settings.get("가게명"):
+                    self.set_row_result(row_idx, **{f"가게명_{idx}": store_detail.get("가게명", "")})
+
+                if settings.get("샵넘버"):
+                    self.set_row_result(row_idx, **{f"샵넘버_{idx}": store_detail.get("샵넘버", "")})
+
+                if settings.get("상태"):
+                    self.set_row_result(row_idx, **{f"상태_{idx}": store_detail.get("상태", "")})
+
+            self.set_row_result(row_idx, status="성공", step="완료", error="")
+            self.write_log(f"[행 {row_idx + 1}] 땡겨요 성공")
+
         except Exception as e:
             friendly_error = self.get_user_friendly_error(step, e)
             self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
@@ -1106,11 +1112,275 @@ class MultiCrawlerApp(tk.Frame):
 
         return store_list
     
+    # --------------------------
+    # 요기요 관련 함수 모음 
+    # --------------------------
+
+    #요기요 로그인 함수 
+    def yogiyo_login(self, driver, user_id, user_pw, row_idx):
+        step = "요기요 로그인 페이지 접속"
+        try:
+            self.set_row_result(row_idx, step=step)
+            driver.get("https://ceo.yogiyo.co.kr/store/receipt")
+            time.sleep(1)
+
+            step = "아이디 입력"
+            self.set_row_result(row_idx, step=step)
+            id_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, '/html/body/div[1]/div/div[1]/div/div[2]/form/div[1]/div/div[2]/div[2]/input')
+                )
+            )
+            id_input.clear()
+            id_input.send_keys(user_id)
+            time.sleep(1)
+
+            step = "비밀번호 입력"
+            self.set_row_result(row_idx, step=step)
+            pw_input = driver.find_element(
+                By.XPATH,
+                '/html/body/div[1]/div/div[1]/div/div[2]/form/div[2]/div/div[2]/div[2]/input'
+            )
+            pw_input.clear()
+            pw_input.send_keys(user_pw)
+            time.sleep(1)
+
+            step = "로그인 버튼 클릭"
+            self.set_row_result(row_idx, step=step)
+            login_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, '/html/body/div[1]/div/div[1]/div/div[2]/form/button')
+                )
+            )
+            login_button.click()
+
+            step = "로그인 결과 확인"
+            self.set_row_result(row_idx, step=step)
+
+            wait = WebDriverWait(driver, 10)
+
+            def login_result_loaded(d):
+                # 1) 로그인 실패 메시지 확인
+                error_elements = d.find_elements(
+                    By.CSS_SELECTOR,
+                    "span.Login___StyledFormErrorMessage-sc-11eppm3-5, span.FormHint__FormErrorMessage-sc-1obz26-1"
+                )
+                for el in error_elements:
+                    try:
+                        error_text = self.clean_text(el.text.strip())
+                        if "아이디 또는 비밀번호가 일치하지 않습니다." in error_text:
+                            return "LOGIN_FAILED"
+                    except Exception:
+                        continue
+
+                # 2) 로그인 성공 후 스토어 선택기 확인
+                success_elements = d.find_elements(
+                    By.CSS_SELECTOR,
+                    "div.StoreSelector__Wrapper-sc-1rowjsb-15.lkBMGb"
+                )
+                for el in success_elements:
+                    try:
+                        if el.is_displayed():
+                            return "LOGIN_SUCCESS"
+                    except Exception:
+                        continue
+
+                return False
+
+            result = wait.until(login_result_loaded)
+
+            if result == "LOGIN_FAILED":
+                raise Exception("로그인 실패")
+
+            if result != "LOGIN_SUCCESS":
+                raise Exception("로그인 결과를 확인할 수 없습니다.")
+
+            time.sleep(1)
+
+        except Exception as e:
+            if str(e) == "로그인 실패":
+                self.set_row_result(row_idx, status="실패", step=step, error="로그인 실패")
+            else:
+                friendly_error = self.get_user_friendly_error(step, e)
+                self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            raise
+
+    #요기요 스토어 선택 레이어 닫힘 대기 함수 
+    def wait_yogiyo_store_selector_closed(self, driver, timeout=10):
+        WebDriverWait(driver, timeout).until_not(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "ul.List__Container-sc-2ocjy3-13"))
+        )
+
+    #요기요 스토어 선택 레이어 열기 
+    def open_yogiyo_store_selector(self, driver, row_idx):
+        step = "스토어 선택 레이어 열기"
+        self.set_row_result(row_idx, step=step)
+
+        selector_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "div.StoreSelector__Wrapper-sc-1rowjsb-15.lkBMGb"))
+        )
+        self.safe_click(driver, selector_button)
+        time.sleep(1)
+
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "ul.List__Container-sc-2ocjy3-13"))
+        )
+
+    #요기요 매장 목록 추출
+    def extract_yogiyo_store_list(self, driver, row_idx):
+        self.open_yogiyo_store_selector(driver, row_idx)
+
+        store_list = []
+
+        group_elements = driver.find_elements(By.CSS_SELECTOR, "li.List__VendorGroup-sc-2ocjy3-11")
+
+        for group in group_elements:
+            business_number = ""
+
+            try:
+                business_text = group.find_element(
+                    By.CSS_SELECTOR,
+                    "p.List__CompanyNumber-sc-2ocjy3-9"
+                ).text.strip()
+                business_number = self.clean_text(business_text.replace("사업자 번호", "").strip())
+            except Exception:
+                business_number = ""
+
+            vendor_elements = group.find_elements(By.CSS_SELECTOR, "li.List__Vendor-sc-2ocjy3-7")
+
+            for vendor in vendor_elements:
+                store_name = ""
+                shop_number = ""
+
+                try:
+                    store_name = vendor.find_element(
+                        By.CSS_SELECTOR,
+                        "p.List__VendorName-sc-2ocjy3-3"
+                    ).text.strip()
+                    store_name = self.clean_text(store_name)
+                except Exception:
+                    store_name = ""
+
+                try:
+                    shop_id_text = vendor.find_element(
+                        By.CSS_SELECTOR,
+                        "span.List__VendorID-sc-2ocjy3-1"
+                    ).text.strip()
+                    shop_number = self.clean_text(shop_id_text.replace("ID.", "").strip())
+                except Exception:
+                    shop_number = ""
+
+                store_list.append({
+                    "가맹점명": store_name,
+                    "샵넘버": shop_number,
+                    "사업자번호": business_number
+                })
+
+        return store_list
+    
+    #요기요 특정 매장 찾기 
+    def find_yogiyo_vendor_element(self, driver, target_store_name, target_shop_number):
+        group_elements = driver.find_elements(By.CSS_SELECTOR, "li.List__VendorGroup-sc-2ocjy3-11")
+
+        for group in group_elements:
+            vendor_elements = group.find_elements(By.CSS_SELECTOR, "li.List__Vendor-sc-2ocjy3-7")
+
+            for vendor in vendor_elements:
+                try:
+                    store_name = vendor.find_element(
+                        By.CSS_SELECTOR,
+                        "p.List__VendorName-sc-2ocjy3-3"
+                    ).text.strip()
+                    store_name = self.clean_text(store_name)
+                except Exception:
+                    store_name = ""
+
+                try:
+                    shop_id_text = vendor.find_element(
+                        By.CSS_SELECTOR,
+                        "span.List__VendorID-sc-2ocjy3-1"
+                    ).text.strip()
+                    shop_number = self.clean_text(shop_id_text.replace("ID.", "").strip())
+                except Exception:
+                    shop_number = ""
+
+                if store_name == self.clean_text(target_store_name) and shop_number == self.clean_text(target_shop_number):
+                    return vendor
+
+        return None
+    
+    #요기요 제휴 POS 사용 여부 수집 함수 
+    def collect_yogiyo_pos_usage(self, driver, row_idx, store_list):
+        for idx, store in enumerate(store_list, start=1):
+            step = f"제휴POS 확인 - {idx}번째 매장"
+            self.set_row_result(row_idx, step=step)
+
+            target_store_name = self.clean_text(store.get("가맹점명", ""))
+            target_shop_number = self.clean_text(store.get("샵넘버", ""))
+
+            success = False
+            last_error = ""
+
+            for attempt in range(2):  # 최대 2회 재시도
+                try:
+                    # 스토어 선택 레이어 다시 열기
+                    self.open_yogiyo_store_selector(driver, row_idx)
+
+                    vendor_element = self.find_yogiyo_vendor_element(driver, target_store_name, target_shop_number)
+                    if not vendor_element:
+                        raise Exception("매장 찾기 실패")
+
+                    # 클릭 전 스크롤 + 안정 클릭
+                    self.safe_click(driver, vendor_element)
+
+                    # 레이어 닫힘 대기
+                    self.wait_yogiyo_store_selector_closed(driver, timeout=10)
+
+                    # 상세 영역 로딩 대기
+                    detail_layout = WebDriverWait(driver, 10).until(
+                        EC.visibility_of_element_located((By.CSS_SELECTOR, "div.styles__Layout-sc-gg5l05-4.bfGbDh"))
+                    )
+
+                    time.sleep(1)
+
+                    pos_value = "미사용"
+
+                    row_elements = detail_layout.find_elements(By.CSS_SELECTOR, "div.styles__Row-sc-gg5l05-1")
+                    for row_el in row_elements:
+                        try:
+                            title_el = row_el.find_element(By.CSS_SELECTOR, "div.styles__Title-sc-1vnvrcd-1")
+                            title_text = self.clean_text(title_el.text.strip())
+
+                            if title_text == "제휴POS":
+                                content_el = row_el.find_element(By.CSS_SELECTOR, "div.styles__Content-sc-gg5l05-3")
+                                content_text = self.clean_text(content_el.text.strip())
+
+                                if "사용 중" in content_text:
+                                    pos_value = "사용 중"
+                                elif content_text:
+                                    pos_value = content_text
+                                else:
+                                    pos_value = "미사용"
+                                break
+                        except Exception:
+                            continue
+
+                    self.set_row_result(row_idx, **{f"제휴포스사용여부_{idx}": pos_value})
+                    success = True
+                    break
+
+                except Exception as sub_e:
+                    last_error = str(sub_e)
+                    time.sleep(1)
+
+            if not success:
+                self.set_row_result(row_idx, **{f"제휴포스사용여부_{idx}": f"수집 실패: {last_error}"})
 
     # --------------------------
     # 쿠팡이츠 관련 함수 모음 
     # --------------------------
 
+    #쿠팡이츠 가맹점 정보 가져오는 함수 
     def extract_coupang_store_list(self, driver):
         store_list = []
 
@@ -1165,6 +1435,285 @@ class MultiCrawlerApp(tk.Frame):
                 continue
 
         return store_list
+
+    # --------------------------
+    # 땡겨요 관련 함수 모음 
+    # --------------------------
+
+    #땡겨요 로그인 함수 
+    def ddangyo_login(self, driver, user_id, user_pw, row_idx):
+        step = "땡겨요 로그인 페이지 접속"
+        try:
+            self.set_row_result(row_idx, step=step)
+            driver.get("https://boss.ddangyo.com/#SH0101")
+            time.sleep(1)
+
+            step = "아이디 입력"
+            self.set_row_result(row_idx, step=step)
+            id_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[2]/ul/li[1]/div[2]/div/input'))
+            )
+            id_input.clear()
+            id_input.send_keys(user_id)
+
+            step = "비밀번호 입력"
+            self.set_row_result(row_idx, step=step)
+            pw_input = driver.find_element(By.XPATH, '/html/body/div[1]/div[2]/ul/li[2]/div[2]/div/input')
+            pw_input.clear()
+            pw_input.send_keys(user_pw)
+
+            step = "로그인 버튼 클릭"
+            self.set_row_result(row_idx, step=step)
+            login_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/input'))
+            )
+            self.safe_click(driver, login_button)
+
+            step = "로그인 결과 확인"
+            self.set_row_result(row_idx, step=step)
+
+            wait = WebDriverWait(driver, 10)
+
+            def login_result_loaded(d):
+                # 1. 아이디 오류
+                try:
+                    id_error = d.find_element(By.ID, "mf_txt_idError")
+                    if id_error.is_displayed():
+                        error_text = self.clean_text(id_error.text.strip())
+                        if "가입된 아이디가 아닙니다" in error_text:
+                            return "ID_ERROR"
+                except Exception:
+                    pass
+
+                # 2. 비밀번호/로그인 오류
+                try:
+                    pw_error = d.find_element(By.ID, "mf_txt_pwError")
+                    if pw_error.is_displayed():
+                        error_text = self.clean_text(pw_error.text.strip())
+                        if "아이디 또는 비밀번호가 일치하지 않습니다" in error_text:
+                            return "PW_ERROR"
+                except Exception:
+                    pass
+
+                # 3. 로그인 성공
+                try:
+                    success_el = d.find_element(By.ID, "mf_wfm_side_gen_menuParent_0_gen_menuSub_0_btn_child")
+                    if success_el.is_displayed():
+                        return "LOGIN_SUCCESS"
+                except Exception:
+                    pass
+
+                return False
+
+            result = wait.until(login_result_loaded)
+
+            if result == "ID_ERROR":
+                raise Exception("아이디 오류")
+            elif result == "PW_ERROR":
+                raise Exception("로그인 실패")
+            elif result != "LOGIN_SUCCESS":
+                raise Exception("로그인 결과를 확인할 수 없습니다.")
+
+            time.sleep(1)
+
+        except Exception as e:
+            if str(e) == "아이디 오류":
+                self.set_row_result(row_idx, status="실패", step=step, error="가입된 아이디가 아닙니다.")
+            elif str(e) == "로그인 실패":
+                self.set_row_result(row_idx, status="실패", step=step, error="아이디 또는 비밀번호가 일치하지 않습니다.")
+            else:
+                friendly_error = self.get_user_friendly_error(step, e)
+                self.set_row_result(row_idx, status="실패", step=step, error=friendly_error)
+            raise
+
+    #땡겨요 가게관리 메뉴 클릭 함수 
+    def go_to_ddangyo_store_manage(self, driver, row_idx):
+        step = "가게관리 메뉴 클릭"
+        self.set_row_result(row_idx, step=step)
+
+        store_manage_button = WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable((
+                By.XPATH,
+                '//a[@id="mf_wfm_side_gen_menuParent_0_gen_menuSub_0_btn_child" and normalize-space(text())="가게관리"]'
+            ))
+        )
+        self.safe_click(driver, store_manage_button)
+        time.sleep(3)
+
+        # 가게관리 화면의 대표 텍스트/영역 확인
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "mf_wfm_contents"))
+        )
+
+    #땡겨요 가게 선택 레이어 열기 함수 
+    def open_ddangyo_store_selector(self, driver, row_idx):
+        step = "가게 선택 레이어 열기"
+        self.set_row_result(row_idx, step=step)
+
+        selector_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "div.w2group.select_store_wrap a.current.pop_call"))
+        )
+        self.safe_click(driver, selector_button)
+        time.sleep(1)
+
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "mf_wfm_contents_gen_patstoSelector"))
+        )
+
+    #땡겨요 가게명 수집 함수 
+    def extract_ddangyo_store_names(self, driver, row_idx):
+        self.open_ddangyo_store_selector(driver, row_idx)
+
+        store_names = []
+        store_items = driver.find_elements(By.CSS_SELECTOR, "#mf_wfm_contents_gen_patstoSelector li")
+
+        for item in store_items:
+            try:
+                name_el = item.find_element(By.CSS_SELECTOR, "span.w2textbox")
+                store_name = self.clean_text(name_el.text.strip())
+                if store_name and store_name not in store_names:
+                    store_names.append(store_name)
+            except Exception:
+                continue
+
+        return store_names
+    
+    #땡겨요 가게 선택 시도 함수 
+    def select_ddangyo_store_by_name(self, driver, row_idx, target_store_name):
+        target_store_name = self.clean_text(target_store_name)
+        last_error = None
+
+        for attempt in range(2):  # 최대 2회 시도
+            try:
+                self.write_log(f"[행 {row_idx + 1}] 가게 선택 시도 {attempt + 1} - {target_store_name}")
+
+                self.open_ddangyo_store_selector(driver, row_idx)
+
+                store_items = driver.find_elements(By.CSS_SELECTOR, "#mf_wfm_contents_gen_patstoSelector li")
+                target_clickable = None
+
+                for item in store_items:
+                    try:
+                        name_el = item.find_element(By.CSS_SELECTOR, "span.w2textbox")
+                        store_name = self.clean_text(name_el.text.strip())
+
+                        if store_name == target_store_name:
+                            target_clickable = item.find_element(By.CSS_SELECTOR, "a")
+                            break
+                    except Exception:
+                        continue
+
+                if not target_clickable:
+                    raise Exception(f"가게 선택 실패: {target_store_name}")
+
+                self.safe_click(driver, target_clickable)
+
+                # 상세 가게명이 실제로 바뀔 때까지 대기
+                WebDriverWait(driver, 10).until(
+                    lambda d: self.clean_text(
+                        d.find_element(By.ID, "mf_wfm_contents_wfm_tabcontents_spa_patstoNm").text.strip()
+                    ) == target_store_name
+                )
+
+                time.sleep(1)
+                return
+
+            except Exception as e:
+                last_error = e
+                time.sleep(1)
+
+        raise last_error
+    
+    #땡겨요 정보 수집 함수 
+    def extract_ddangyo_store_detail(self, driver, target_store_name=None):
+        store_name = ""
+        shop_number = ""
+        store_status = ""
+
+        # 가게명
+        try:
+            name_el = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "mf_wfm_contents_wfm_tabcontents_spa_patstoNm"))
+            )
+            store_name = self.clean_text(name_el.text.strip())
+        except Exception:
+            store_name = ""
+
+        # target과 실제 상세값이 다르면 예외
+        if target_store_name:
+            if self.clean_text(store_name) != self.clean_text(target_store_name):
+                raise Exception(f"상세 화면 가게명 불일치: 기대값={target_store_name}, 실제값={store_name}")
+
+        # 가맹점번호
+        try:
+            shop_no_el = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "mf_wfm_contents_wfm_tabcontents_spa_patstoNo"))
+            )
+            shop_number = self.clean_text(shop_no_el.text.strip())
+        except Exception:
+            shop_number = ""
+
+        # 상태: 노출중
+        try:
+            status_y = driver.find_element(By.ID, "mf_wfm_contents_wfm_tabcontents_grp_patstoOprStatY")
+            if status_y.is_displayed():
+                spans = status_y.find_elements(By.CSS_SELECTOR, "span.w2span")
+                for sp in spans:
+                    text = self.clean_text(sp.text.strip())
+                    if text:
+                        store_status = text
+                        break
+        except Exception:
+            pass
+
+        # 상태: 노출중지
+        if not store_status:
+            try:
+                status_n = driver.find_element(By.ID, "mf_wfm_contents_wfm_tabcontents_grp_patstoOprStatN")
+                if status_n.is_displayed():
+                    spans = status_n.find_elements(By.CSS_SELECTOR, "span.w2span")
+                    for sp in spans:
+                        text = self.clean_text(sp.text.strip())
+                        if text:
+                            store_status = text
+                            break
+            except Exception:
+                pass
+
+        return {
+            "가게명": store_name,
+            "샵넘버": shop_number,
+            "상태": store_status
+        }
+
+    # --------------------------
+    # 공통 함수 모음 
+    # --------------------------
+    
+    #텍스트 정리 함수
+    def clean_text(self, value):
+        return " ".join((value or "").split())
+    
+    #클릭 안정화 함수
+    def safe_click(self, driver, element):
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        try:
+            element.click()
+            return
+        except Exception:
+            pass
+
+        try:
+            driver.execute_script("arguments[0].click();", element)
+            return
+        except Exception:
+            raise
+
 
 
 

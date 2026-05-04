@@ -540,7 +540,7 @@ class CrawlingFinance_Daily(tk.Frame):
             while current_date <= self.end_date:
 
                 # 날짜 직접 선택 버튼 클릭
-                date_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div[1]/div[2]/div[1]/button[1]')))
+                date_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[3]/div[2]/div[1]/button[1]')))
                 date_button.click()
                 time.sleep(3)
 
