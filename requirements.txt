@@ -1,0 +1,10 @@
+pandas
+openpyxl
+xlrd
+requests
+selenium
+undetected-chromedriver
+webdriver-manager
+pyautogui
+tkcalendar
+setuptools
