@@ -478,6 +478,15 @@ class CrawlingFinance_Daily(tk.Frame):
                 continue
         raise TimeoutException(f"요소를 찾지 못함: {locators}")
 
+    # 배민 로딩 스피너(LoadingBackdrop)가 사라질 때까지 대기 (평소엔 display:none)
+    def _wait_loading(self, driver, timeout=20):
+        try:
+            WebDriverWait(driver, timeout).until(
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, '[class*="LoadingBackdrop-module__"]'))
+            )
+        except TimeoutException:
+            print("로딩이 끝나지 않음 - 계속 진행")
+
     def crawl_baemin(self, driver, user_id, user_pw, shop_id, row_idx):
         step = "페이지접속"
         try:
@@ -538,16 +547,18 @@ class CrawlingFinance_Daily(tk.Frame):
             step = "필터열기"
             choose_button = self._find_clickable(driver, [
                 (By.CLASS_NAME, 'FilterContainer-module__ccrG'),
-                (By.CSS_SELECTOR, '[class*="FilterContainer-module__"]'),
+                # 필터 영역의 마지막 버튼 (가게/주문상태/결제방법 필터)
+                (By.XPATH, '//div[contains(@class, "FilterContainer-module__")][button]/button[last()]'),
             ])
             choose_button.click()
             time.sleep(3)
 
             # Shop 선택
             step = "가게선택"
+            # 상단 헤더의 서비스 전환 select도 같은 클래스라서, SHOP_ID 옵션을 가진 select를 우선으로 찾음
             select_element = self._find_clickable(driver, [
-                (By.CSS_SELECTOR, "select.Select_b_r4ax_11w1d6i7"),
                 (By.XPATH, f'//select[option[@value="{shop_id}"]]'),
+                (By.CSS_SELECTOR, "select.Select_b_r4ax_11w1d6i7"),
             ])
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", select_element)  # 요소를 스크롤하여 중앙으로 이동
             time.sleep(3)  # 잠시 대기
@@ -582,11 +593,16 @@ class CrawlingFinance_Daily(tk.Frame):
 
                 # 날짜 직접 선택 버튼 클릭
                 step = f"날짜선택_{current_date}"
-                date_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[3]/div[2]/div[1]/button[1]')))
+                # 필터 영역의 첫 번째 버튼 ("날짜 직접 선택 / 기간" 버튼)
+                date_button = self._find_clickable(driver, [
+                    (By.XPATH, '//div[contains(@class, "FilterContainer-module__")][button]/button[1]'),
+                    (By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[3]/div[1]/div[1]/button[1]'),
+                ], timeout=10)
                 date_button.click()
                 time.sleep(3)
 
                 # 캘린더(Datepicker) 버튼 클릭
+                step = f"달력열기_{current_date}"
                 date_calander_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//button[@data-atelier-component="DatePicker.Trigger"]')))
                 date_calander_button.click()
                 time.sleep(3)
@@ -595,9 +611,12 @@ class CrawlingFinance_Daily(tk.Frame):
                 self.set_single_baemin_date(driver, current_date)
                 time.sleep(3)
 
-                
+                # 조회 로딩(스피너)이 끝날 때까지 대기 - 이전 날짜 값을 읽지 않도록
+                step = f"조회대기_{current_date}"
+                self._wait_loading(driver)
 
                 # 매출금액 수집
+                step = f"매출수집_{current_date}"
                 try:
                     finance_element = WebDriverWait(driver, 10).until(
                         EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "TotalSummary-module__")]/div[2]/span[contains(@class, "TotalSummary-module__")]/b'))
