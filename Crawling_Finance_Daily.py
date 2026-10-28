@@ -402,56 +402,54 @@ class CrawlingFinance_Daily(tk.Frame):
         except TimeoutException:
             pass
 
-    def set_single_baemin_date(self, driver, target_date):
-        target_table = self._ensure_month_on_side(driver, target_date, side="left")
-        self._click_day_in_table(driver, target_table, target_date)
-        time.sleep(3)
+    # 배민 DatePicker 팝업 / 기간·필터 시트 XPath
+    DP_XPATH = '//*[@data-atelier-component="DatePicker" and @role="dialog" and @data-present="true"]'
+    SHEET_XPATH = '//div[@role="dialog" and @data-present="true" and not(@data-atelier-component="DatePicker")]'
 
-        # 1차 적용 버튼 
-        # 취소 버튼 옆의 적용 버튼 찾기
-        apply_button_xpath = '//span[text()="취소"]/ancestor::div//span[text()="적용"]/ancestor::button'
-        apply_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, apply_button_xpath))
-        )
-        
+    # 하루 선택: 같은 날짜를 정확히 두 번 클릭 (시작일 = 종료일)
+    # 클릭할 때마다 달력이 다시 그려지므로 매번 버튼을 새로 찾음
+    def _click_single_day(self, driver, date_obj):
+        caption = f"{date_obj.year}년 {date_obj.month}월"
+        day_xpath = (f'{self.DP_XPATH}//table[@role="grid"][caption[normalize-space()="{caption}"]]'
+                     f'//button[@aria-label="{date_obj.day}일" and not(@aria-disabled="true")]')
+        for _ in range(2):
+            btn = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, day_xpath)))
+            driver.execute_script("arguments[0].scrollIntoView({block:\"center\"});", btn)
+            try:
+                btn.click()
+            except (ElementClickInterceptedException, StaleElementReferenceException):
+                driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, day_xpath))
+            time.sleep(1)
+
+    # 버튼 클릭 (가려지거나 다시 그려진 경우 JS 클릭으로 재시도)
+    def _click_xpath(self, driver, xpath, timeout=10):
+        btn = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.XPATH, xpath)))
         try:
-            apply_button.click()
+            btn.click()
         except (ElementClickInterceptedException, StaleElementReferenceException):
-            driver.execute_script("arguments[0].click();", apply_button)
-            
-        time.sleep(3)
-        
-        # 2차 적용 버튼을 찾을 때 동일하게 적용
-        apply2_btn_xpath = '//button[.//span[text()="적용"] and @data-atelier-component="Button"]'
-        apply2_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, apply2_btn_xpath))
-        )
+            driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, xpath))
+
+    def set_single_baemin_date(self, driver, target_date):
+        self._ensure_month_on_side(driver, target_date, side="left")
+        self._click_single_day(driver, target_date)
+        time.sleep(2)
+
+        # 1차 적용 버튼 (달력 팝업 안의 "취소" 옆 "적용")
+        self._click_xpath(driver, f'{self.DP_XPATH}//button[@data-atelier-component="Button"][.//span[text()="적용"]]')
+
+        # 달력 팝업 닫힘 대기
         try:
-            apply2_btn.click()
-            time.sleep(3)
-        except (StaleElementReferenceException, ElementClickInterceptedException):
-            apply2_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, apply2_btn_xpath))
-            )
-            driver.execute_script("arguments[0].click();", apply2_btn)
-            
-        # DatePicker 닫힘 대기(옵션)
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.invisibility_of_element_located((
-                    By.XPATH, '//*[@data-atelier-component="DatePicker" and @role="dialog" and @data-present="true"]'
-                ))
-            )
+            WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, self.DP_XPATH)))
         except TimeoutException:
             pass
+        time.sleep(1)
 
-        # DatePicker 닫힘 대기(옵션)
+        # 2차 적용 버튼 ("기간" 시트 하단 "적용")
+        self._click_xpath(driver, f'{self.SHEET_XPATH}//button[@data-atelier-component="Button"][.//span[text()="적용"]]')
+
+        # 기간 시트 닫힘 대기
         try:
-            WebDriverWait(driver, 10).until(
-                EC.invisibility_of_element_located((
-                    By.XPATH, '//*[@data-atelier-component="DatePicker" and @role="dialog" and @data-present="true"]'
-                ))
-            )
+            WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, self.SHEET_XPATH)))
         except TimeoutException:
             pass
 
@@ -580,12 +578,13 @@ class CrawlingFinance_Daily(tk.Frame):
 
             # 적용 버튼 클릭
             step = "가게적용"
-            apply_button_xpath = '//span[text()="적용"]/ancestor::button[@aria-disabled="false"]'
-            apply_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, apply_button_xpath)))
+            self._click_xpath(driver, f'{self.SHEET_XPATH}//button[@aria-disabled="false"][.//span[text()="적용"]]')
+            # 필터 시트 닫힘 + 조회 로딩 대기
             try:
-                apply_button.click()
-            except (ElementClickInterceptedException, StaleElementReferenceException):
-                driver.execute_script("arguments[0].click();", apply_button)
+                WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, self.SHEET_XPATH)))
+            except TimeoutException:
+                pass
+            self._wait_loading(driver)
             time.sleep(3)
 
             current_date = self.start_date
@@ -600,6 +599,15 @@ class CrawlingFinance_Daily(tk.Frame):
                 ], timeout=10)
                 date_button.click()
                 time.sleep(3)
+
+                # 기간 유형을 "날짜"(직접 선택)로 - 일・주/월/분기가 선택돼 있으면 달력 버튼이 없음
+                step = f"기간유형_{current_date}"
+                direct_radio = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, '//input[@name="DateFilterType" and @value="directly"]'))
+                )
+                if not direct_radio.is_selected():
+                    driver.find_element(By.XPATH, '//input[@name="DateFilterType" and @value="directly"]/following-sibling::label').click()
+                    time.sleep(1)
 
                 # 캘린더(Datepicker) 버튼 클릭
                 step = f"달력열기_{current_date}"
